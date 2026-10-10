@@ -25,6 +25,10 @@ services:
       - MIVOLO_ENABLE=1
       - MIVOLO_MODEL=iitolstykh/mivolo_v2
       - MIVOLO_REFRESH=5.0  # ekoi face e eto sec por por re-check (fast cache)
+      - HEADPOSE_ENABLE=1
+      - HEADPOSE_MODEL=/app/models/whenet.onnx
+      - LOOK_YAW=25
+      - LOOK_PITCH=20
       - FLIP_H=0
       - FLIP_V=0
     restart: unless-stopped

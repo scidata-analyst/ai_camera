@@ -43,11 +43,19 @@ http://localhost:8080/api/health
 | MIVOLO_ENABLE | 1 | 0 korle age/gender off |
 | MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
 | MIVOLO_REFRESH | 5.0 | ekoi face e eto sec por por re-check (cache fast) |
+| HEADPOSE_ENABLE | 1 | 0 korle looking off |
+| HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
+| LOOK_YAW / LOOK_PITCH | 25 / 20 | looking threshold degree |
 
 ## Speed design (lag-free)
 - Inference background thread e chole, MJPEG stream alada ~25-30fps e serve hoy.
 - Tai YOLO slow holeo video atke na — box update infer rate e (~2-8fps) hoy.
 - `IMG_SIZE` komale box update fast, barale accuracy valo.
+
+## Looking at camera (WHENet head pose)
+- Per face: `yaw/pitch/roll` degree + `looking` bool.
+- `|yaw|<=25° and |pitch|<=20°` → **Looking** (green box + 👀 label).
+- `/api/faces` e full JSON; header e `Look:x` count. CPU te ~15ms/face.
 
 ## Gender + Age (MiVOLO V2)
 - Per face: `gender Male/Female + gconf` + `age` (bochor). Adience gender 97.3.
