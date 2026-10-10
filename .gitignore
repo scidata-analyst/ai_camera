@@ -1,1 +1,4 @@
-models/huggingface/
+models/
+__pycache__/
+*.pyc
+*.pyo
