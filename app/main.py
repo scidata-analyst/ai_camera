@@ -18,6 +18,7 @@ JPEG_Q = int(os.getenv("JPEG_QUALITY", "70"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 MIVOLO_ENABLE = os.getenv("MIVOLO_ENABLE", "1") == "1"
+HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
 FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face e gender off
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
@@ -28,6 +29,7 @@ camera = CameraStream()
 detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
                          window_sec=WINDOW_SEC, face_enable=FACE_ENABLE,
                          mivolo_enable=MIVOLO_ENABLE,
+                         headpose_enable=HEADPOSE_ENABLE,
                          face_min_size=FACE_MIN_SIZE)
 camera.start()
 
@@ -94,7 +96,7 @@ a{color:#4fc3f7}
 <button onclick="setFlip('v')">Flip V: <span id="fv">-</span></button>
 <button onclick="resetFlip()">Reset</button>
 </div>
-<div class="info">Green = <b>Human</b> | Orange = <b>Non-Human</b> | Cyan = <b>Face M/F+age</b> |
+<div class="info">Green Human | Cyan Face | <b>Green [LOOK] = Looking</b> |
 <a href="/api/stats">stats</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></div>
 <script>
 async function tick(){
@@ -103,7 +105,7 @@ async function tick(){
     const s = j.smoothed;
     document.getElementById('s').innerHTML =
       `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
-      `M:${s.stable_male} W:${s.stable_female} | ` +
+      `M:${s.stable_male} W:${s.stable_female} Look:${j.instant.looking} | ` +
       `instant M:${j.instant.male} W:${j.instant.female} infer:${j.infer_fps}fps`;
     document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
     document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';
@@ -137,6 +139,8 @@ def health():
             "face_min_size": FACE_MIN_SIZE,
             "mivolo_enabled": MIVOLO_ENABLE,
             "mivolo_loaded": detector.mivolo_enabled,
+            "headpose_enabled": HEADPOSE_ENABLE,
+            "headpose_loaded": detector.headpose_enabled,
             "infer_fps": round(_infer_fps, 1)}
 
 

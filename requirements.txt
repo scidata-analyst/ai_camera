@@ -7,3 +7,4 @@ transformers==4.51.0
 accelerate==1.8.1
 timm==0.9.16
 lapx>=0.5.2
+onnxruntime>=1.17

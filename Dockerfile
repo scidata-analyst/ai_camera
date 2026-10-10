@@ -15,6 +15,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FACE_MODEL=/app/models/yunet.onnx \
     MIVOLO_ENABLE=1 \
     MIVOLO_MODEL=iitolstykh/mivolo_v2 \
+    HEADPOSE_ENABLE=1 \
+    HEADPOSE_MODEL=/app/models/whenet.onnx \
+    LOOK_YAW=25 \
+    LOOK_PITCH=20 \
     HF_HOME=/root/.cache/huggingface
 
 # opencv + torch dependency (+git for MiVOLO lib)
@@ -35,6 +39,8 @@ RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
 RUN mkdir -p /app/models && \
     curl -L -o /app/models/yunet.onnx \
     https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx && \
+    curl -L -o /app/models/whenet.onnx \
+    https://github.com/PINTO0309/HeadPoseEstimation-WHENet-yolov4-onnx-openvino/releases/download/v1.0.4/whenet_1x3x224x224_prepost.onnx && \
     ls -lh /app/models/
 # MiVOLO weights (~115MB) pre-download -> HF cache
 RUN python -c "import app.mivolo; from transformers import AutoModelForImageClassification; AutoModelForImageClassification.from_pretrained('iitolstykh/mivolo_v2', trust_remote_code=True)"

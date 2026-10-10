@@ -77,12 +77,15 @@ class YuNetFace:
         for fc in faces:
             x1, y1, x2, y2 = fc["box"]
             conf = fc["conf"]
-            # cyan box = Face (+ gender/age jodi thake)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+            # looking face = green box, na takale cyan
+            color = (0, 255, 0) if fc.get("looking") else (255, 255, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             if fc.get("gender") and fc.get("gender") != "Unknown":
                 label = f"{fc['gender'][0]}{fc['gconf']:.2f} {fc.get('age', 0)}y"
             else:
                 label = f"Face {conf:.2f}"
+            if fc.get("looking"):
+                label += " [LOOK]"  # ASCII only (emoji OpenCV te ???? hoy)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), (255, 255, 0), -1)
             cv2.putText(frame, label, (x1, y1 - 5),
