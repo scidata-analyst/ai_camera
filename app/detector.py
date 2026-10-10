@@ -7,13 +7,14 @@ import cv2
 import numpy as np
 
 from .smoother import CountSmoother
+from .face_detector import YuNetFace
 
 
 class HumanDetector:
-    """Wraps ultralytics YOLO. person (class 0) -> Human, else Non-Human."""
+    """Wraps ultralytics YOLO. person (class 0) -> Human, else Non-Human + YuNet Face."""
 
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
-                 window_sec: float = 1.0):
+                 window_sec: float = 1.0, face_enable: bool = True):
         from ultralytics import YOLO
 
         self.conf = conf
@@ -23,7 +24,10 @@ class HumanDetector:
         self.model = YOLO(model_name)
         self.names = self.model.names  # {0: 'person', ...}
         self._lock = threading.Lock()
-        self.last_counts = {"human": 0, "non_human": 0, "fps": 0.0}
+        self.last_counts = {"human": 0, "non_human": 0, "face": 0, "fps": 0.0}
+        self.last_faces = []
+        self.face = YuNetFace() if face_enable else None
+        self.face_enabled = self.face is not None and self.face.detector is not None
         self.smoother = CountSmoother(window_sec=window_sec)
         self.smoothed = self.smoother.current
         self._t_prev = time.time()
@@ -68,18 +72,31 @@ class HumanDetector:
             cv2.putText(frame, label, (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
+        # YuNet face detection (Human box er baireo full frame e chole)
+        faces = []
+        if self.face is not None:
+            try:
+                faces = self.face.detect(frame)
+                YuNetFace.draw(frame, faces)
+            except Exception as e:
+                print(f"[face] infer fail: {e}")
+                faces = []
+        face_n = len(faces)
+        self.last_faces = faces
+
         # FPS + 1-sec smoothed header (mean/median/mode)
         now = time.time()
         inst = 1.0 / max(now - self._t_prev, 1e-6)
         self._t_prev = now
         self._fps_smooth = self._fps_smooth * 0.9 + inst * 0.1
 
-        self.smoothed = self.smoother.add(human_n, non_human_n)
+        self.smoothed = self.smoother.add(human_n, non_human_n, face_n)
         sh = self.smoothed["stable_human"]
         sn = self.smoothed["stable_non_human"]
+        sf = self.smoothed.get("stable_face", face_n)
         mh = self.smoothed["human"]["mean"]
 
-        header = (f"Human:{human_n}[stable:{sh}] Non-Human:{non_human_n}[stable:{sn}] "
+        header = (f"H:{human_n}[{sh}] N:{non_human_n}[{sn}] F:{face_n}[{sf}] "
                   f"FPS:{self._fps_smooth:.1f}")
         sub = (f"1s avg mean:{mh} median:{self.smoothed['human']['median']} "
                f"mode:{self.smoothed['human']['mode']}")
@@ -90,7 +107,7 @@ class HumanDetector:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
 
         self.last_counts = {
-            "human": human_n, "non_human": non_human_n,
+            "human": human_n, "non_human": non_human_n, "face": face_n,
             "fps": round(self._fps_smooth, 1),
         }
         return frame, detections
