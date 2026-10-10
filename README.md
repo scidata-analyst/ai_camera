@@ -1,9 +1,10 @@
-# AI Camera — Human + Face Detector (RK3576 + Docker + YOLOv11n + YuNet)
+# AI Camera — Human + Face + Gender (RK3576 + Docker + YOLOv11n + YuNet + MiVOLO)
 
-USB webcam (`/dev/video0`) theke frame niye YOLOv11n + YuNet diye detect kore.
+USB webcam (`/dev/video0`) theke frame niye YOLOv11n + YuNet + MiVOLO diye detect kore.
 - `person` (class 0) -> **Human** (green box)
 - onno sob class -> **Non-Human** (orange box)
 - YuNet -> **Face** (cyan box + 5 landmark dot: eyes, nose, mouth)
+- MiVOLO V2 (face + body dual input) -> **Male/Female + age** (face label e, e.g. `F0.93 27y`)
 - Live MJPEG stream: `http://localhost:8080`
 
 ## Quick start (RK3576 / Linux)
@@ -31,14 +32,31 @@ http://localhost:8080/api/health
 | CAMERA_SOURCE | 0 | `/dev/video0`, RTSP URL ba video file o cholbe |
 | MODEL_NAME | yolo11n.pt | `yolo11n/s/m` |
 | CONF_THRESHOLD | 0.5 | 0.3-0.7 |
-| IMG_SIZE | 480 | RK3576 CPU te 480 fast, PC te 640 |
-| FRAME_SKIP | 2 | 2 mane proti 2nd frame e infer |
+| IMG_SIZE | 384 | 320=fast, 480=accurate, 384=balance (32 er multiple) |
 | FRAME_WIDTH/HEIGHT | 640x480 | camera resolution |
-| JPEG_QUALITY | 75 | stream quality |
+| JPEG_QUALITY | 70 | stream quality |
 | SMOOTH_WINDOW | 1.0 | 1 sec window te mean/median/mode, stable = mode |
 | FACE_ENABLE | 1 | 0 korle face off |
 | FACE_SCORE | 0.6 | YuNet conf threshold |
 | FACE_MODEL | /app/models/yunet.onnx | auto-download hoy |
+| FACE_MIN_SIZE | 60 | choto face e gender Unknown (vul prediction komate) |
+| MIVOLO_ENABLE | 1 | 0 korle age/gender off |
+| MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
+| MIVOLO_REFRESH | 5.0 | ekoi face e eto sec por por re-check (cache fast) |
+
+## Speed design (lag-free)
+- Inference background thread e chole, MJPEG stream alada ~25-30fps e serve hoy.
+- Tai YOLO slow holeo video atke na — box update infer rate e (~2-8fps) hoy.
+- `IMG_SIZE` komale box update fast, barale accuracy valo.
+
+## Gender + Age (MiVOLO V2)
+- Per face: `gender Male/Female + gconf` + `age` (bochor). Adience gender 97.3.
+- Input dual: YuNet face crop + YOLO human box (body); body na pele face-only.
+- Video label: `M0.91 27y` / `F0.93 24y`; `/api/faces` e full JSON; header e `M:x W:y` count.
+- Note: MiVOLO vari (28.7M, ~1s/face CPU) — tai face cache ache: ekoi face e
+  model 1 bar chole, tarpor 5s porjonto cache theke (0ms). Notun/norechora
+  face e 1 bar slow hobe, stream atkabe na (background thread).
+- Bachcha/side-face e age ±5y hote pare.
 
 ## Face (YuNet) result
 - Per face: `box [x1,y1,x2,y2]` + `conf` + `landmarks[5]` (eyes, nose, mouth corners).
@@ -46,15 +64,15 @@ http://localhost:8080/api/health
 - Smoothing face er jonneo 1-sec mean/median/mode hoy.
 
 ## Smoothing (1 sec update)
-- Proti frame er `human/non_human` count 1-sec sliding window e joma hoy.
+- `human/non_human/face/male/female` count 1-sec window e joma hoy.
 - Proti 1 sec por por `mean / median / mode` publish hoy, UI + `/api/stats` e dekha jay.
-- Video overlay: `Human:instant[stable:X]` + 2nd line `1s avg mean/median/mode`.
-- Web UI panel o 1 sec por por auto-refresh hoy.
+- Choto face (<FACE_MIN_SIZE) e gender `Unknown` dekhay, count eo dhore na — vul M/F komate.
+- Web UI panel o 1 sec por por auto-refresh hoy (stable M/W soho).
 
 ## RK3576 note
 - Base image `python:3.11-slim` → arm64/amd64 duitai chole, tai same Dockerfile board + PC te cholbe.
-- CPU mode e ~8-15 FPS (480p, FRAME_SKIP=2).
-- NPU (RKNN) lagle pore `yolo11n.pt → .rknn` convert kore detector swap korte hobe.
+- Stream ~25fps constant; box update CPU onujayi ~2-8fps (thread decoupled).
+- NPU (RKNN) lagle `yolo11n.pt → .rknn` + YuNet/Gender INT8 convert korte hobe.
 - Camera permission issue hole `privileged: true` uncomment koro ba `sudo usermod -aG video $USER`.
 
 ## Dev (docker chara)

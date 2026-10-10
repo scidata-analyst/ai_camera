@@ -8,26 +8,32 @@ import numpy as np
 
 from .smoother import CountSmoother
 from .face_detector import YuNetFace
+from .mivolo import MiVOLOAgeGender
 
 
 class HumanDetector:
-    """Wraps ultralytics YOLO. person (class 0) -> Human, else Non-Human + YuNet Face."""
+    """YOLO Human + YuNet Face + MiVOLO age/gender."""
 
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
-                 window_sec: float = 1.0, face_enable: bool = True):
+                 window_sec: float = 1.0, face_enable: bool = True,
+                 mivolo_enable: bool = True, face_min_size: int = 60):
         from ultralytics import YOLO
 
         self.conf = conf
         self.imgsz = imgsz
         self.model_name = model_name
+        self.face_min_size = int(face_min_size)
         # lazy download on first run; Docker build e cache kora jabe
         self.model = YOLO(model_name)
         self.names = self.model.names  # {0: 'person', ...}
         self._lock = threading.Lock()
-        self.last_counts = {"human": 0, "non_human": 0, "face": 0, "fps": 0.0}
+        self.last_counts = {"human": 0, "non_human": 0, "face": 0,
+                            "male": 0, "female": 0, "fps": 0.0}
         self.last_faces = []
         self.face = YuNetFace() if face_enable else None
         self.face_enabled = self.face is not None and self.face.detector is not None
+        self.mivolo = MiVOLOAgeGender() if (mivolo_enable and self.face_enabled) else None
+        self.mivolo_enabled = self.mivolo is not None and self.mivolo.loaded
         self.smoother = CountSmoother(window_sec=window_sec)
         self.smoothed = self.smoother.current
         self._t_prev = time.time()
@@ -72,16 +78,23 @@ class HumanDetector:
             cv2.putText(frame, label, (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-        # YuNet face detection (Human box er baireo full frame e chole)
+        # YuNet face + MiVOLO age/gender (body = YOLO human box)
         faces = []
         if self.face is not None:
             try:
                 faces = self.face.detect(frame)
+                # Gender+Age: sudhu boro/clear face e (choto face = vul result)
+                if self.mivolo is not None and faces:
+                    bodies = [d["box"] for d in detections if d["kind"] == "human"]
+                    faces = self.mivolo.predict_frame(
+                        frame, faces, bodies, min_side=self.face_min_size)
                 YuNetFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")
                 faces = []
         face_n = len(faces)
+        male_n = sum(1 for f in faces if f.get("gender") == "Male")
+        female_n = sum(1 for f in faces if f.get("gender") == "Female")
         self.last_faces = faces
 
         # FPS + 1-sec smoothed header (mean/median/mode)
@@ -90,14 +103,17 @@ class HumanDetector:
         self._t_prev = now
         self._fps_smooth = self._fps_smooth * 0.9 + inst * 0.1
 
-        self.smoothed = self.smoother.add(human_n, non_human_n, face_n)
+        self.smoothed = self.smoother.add(human_n, non_human_n, face_n,
+                                            male_n, female_n)
         sh = self.smoothed["stable_human"]
         sn = self.smoothed["stable_non_human"]
         sf = self.smoothed.get("stable_face", face_n)
+        sm = self.smoothed.get("stable_male", male_n)
+        sw = self.smoothed.get("stable_female", female_n)
         mh = self.smoothed["human"]["mean"]
 
-        header = (f"H:{human_n}[{sh}] N:{non_human_n}[{sn}] F:{face_n}[{sf}] "
-                  f"FPS:{self._fps_smooth:.1f}")
+        header = (f"H:{human_n}[{sh}] F:{face_n}[{sf}] "
+                  f"M:{male_n}[{sm}] W:{female_n}[{sw}] FPS:{self._fps_smooth:.1f}")
         sub = (f"1s avg mean:{mh} median:{self.smoothed['human']['median']} "
                f"mode:{self.smoothed['human']['mode']}")
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 56), (0, 0, 0), -1)
@@ -108,6 +124,7 @@ class HumanDetector:
 
         self.last_counts = {
             "human": human_n, "non_human": non_human_n, "face": face_n,
+            "male": male_n, "female": female_n,
             "fps": round(self._fps_smooth, 1),
         }
         return frame, detections

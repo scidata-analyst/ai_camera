@@ -3,3 +3,7 @@ uvicorn[standard]>=0.27,<0.31
 opencv-python-headless>=4.9,<5.0
 numpy>=1.26,<2.0
 ultralytics>=8.2,<8.4
+transformers==4.51.0
+accelerate==1.8.1
+timm==0.9.16
+lapx>=0.5.2

@@ -13,15 +13,18 @@ services:
       - CAMERA_SOURCE=0
       - MODEL_NAME=yolo11n.pt
       - CONF_THRESHOLD=0.5
-      - IMG_SIZE=480      # RK3576 CPU te 480 fast, PC te 640 accurate
-      - FRAME_SKIP=2
+      - IMG_SIZE=384      # 320=fast, 480=accurate, 384=balance
       - FRAME_WIDTH=640
       - FRAME_HEIGHT=480
-      - JPEG_QUALITY=75
+      - JPEG_QUALITY=70
       - SMOOTH_WINDOW=1.0  # 1 sec por por mean/median/mode update
       - FACE_ENABLE=1
       - FACE_SCORE=0.6
       - FACE_MODEL=/app/models/yunet.onnx
+      - FACE_MIN_SIZE=60   # choto face e gender off (vul komate)
+      - MIVOLO_ENABLE=1
+      - MIVOLO_MODEL=iitolstykh/mivolo_v2
+      - MIVOLO_REFRESH=5.0  # ekoi face e eto sec por por re-check (fast cache)
       - FLIP_H=0
       - FLIP_V=0
     restart: unless-stopped
