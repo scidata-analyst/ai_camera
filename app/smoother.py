@@ -35,22 +35,28 @@ def _stats(values):
 class CountSmoother:
     def __init__(self, window_sec: float = 1.0):
         self.window_sec = float(window_sec)
-        self.history: collections.deque = collections.deque()  # (t, h, n, f)
+        self.history: collections.deque = collections.deque()  # (t,h,n,f,m,w)
         self._cached = {
             "human": {"mean": 0.0, "median": 0, "mode": 0},
             "non_human": {"mean": 0.0, "median": 0, "mode": 0},
             "face": {"mean": 0.0, "median": 0, "mode": 0},
+            "male": {"mean": 0.0, "median": 0, "mode": 0},
+            "female": {"mean": 0.0, "median": 0, "mode": 0},
             "stable_human": 0,
             "stable_non_human": 0,
             "stable_face": 0,
+            "stable_male": 0,
+            "stable_female": 0,
             "samples": 0,
             "updated_at": time.time(),
         }
         self._last_publish = 0.0  # force first publish
 
-    def add(self, human: int, non_human: int, face: int = 0):
+    def add(self, human: int, non_human: int, face: int = 0,
+            male: int = 0, female: int = 0):
         now = time.time()
-        self.history.append((now, int(human), int(non_human), int(face)))
+        self.history.append((now, int(human), int(non_human),
+                             int(face), int(male), int(female)))
         # purono sample bad dao
         cutoff = now - self.window_sec
         while self.history and self.history[0][0] < cutoff:
@@ -62,17 +68,25 @@ class CountSmoother:
             hs = [x[1] for x in self.history]
             ns = [x[2] for x in self.history]
             fs = [x[3] if len(x) > 3 else 0 for x in self.history]
+            ms = [x[4] if len(x) > 4 else 0 for x in self.history]
+            ws = [x[5] if len(x) > 5 else 0 for x in self.history]
             h_stat = _stats(hs)
             n_stat = _stats(ns)
             f_stat = _stats(fs)
+            m_stat = _stats(ms)
+            w_stat = _stats(ws)
             self._cached = {
                 "human": h_stat,
                 "non_human": n_stat,
                 "face": f_stat,
+                "male": m_stat,
+                "female": w_stat,
                 # stable = mode (sobcheye frequent), flicker-free
                 "stable_human": h_stat["mode"],
                 "stable_non_human": n_stat["mode"],
                 "stable_face": f_stat["mode"],
+                "stable_male": m_stat["mode"],
+                "stable_female": w_stat["mode"],
                 "samples": len(hs),
                 "updated_at": now,
             }
