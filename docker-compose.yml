@@ -1,0 +1,22 @@
+services:
+  ai-camera:
+    build: .
+    image: ai-camera:rk3576
+    container_name: ai-camera
+    ports:
+      - "8080:8080"
+    devices:
+      - "/dev/video0:/dev/video0"  # USB webcam; na thakle line ta comment koro
+    volumes:
+      - ./models:/root/.cache  # YOLO weight cache (optional)
+    environment:
+      - CAMERA_SOURCE=0
+      - MODEL_NAME=yolo11n.pt
+      - CONF_THRESHOLD=0.5
+      - IMG_SIZE=480      # RK3576 CPU te 480 fast, PC te 640 accurate
+      - FRAME_SKIP=2
+      - FRAME_WIDTH=640
+      - FRAME_HEIGHT=480
+      - JPEG_QUALITY=75
+    restart: unless-stopped
+    # privileged: true  # dorkar hole uncomment (camera permission issue)
