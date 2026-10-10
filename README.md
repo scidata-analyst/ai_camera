@@ -33,6 +33,13 @@ http://localhost:8080/api/health
 | FRAME_SKIP | 2 | 2 mane proti 2nd frame e infer |
 | FRAME_WIDTH/HEIGHT | 640x480 | camera resolution |
 | JPEG_QUALITY | 75 | stream quality |
+| SMOOTH_WINDOW | 1.0 | 1 sec window te mean/median/mode, stable = mode |
+
+## Smoothing (1 sec update)
+- Proti frame er `human/non_human` count 1-sec sliding window e joma hoy.
+- Proti 1 sec por por `mean / median / mode` publish hoy, UI + `/api/stats` e dekha jay.
+- Video overlay: `Human:instant[stable:X]` + 2nd line `1s avg mean/median/mode`.
+- Web UI panel o 1 sec por por auto-refresh hoy.
 
 ## RK3576 note
 - Base image `python:3.11-slim` → arm64/amd64 duitai chole, tai same Dockerfile board + PC te cholbe.
