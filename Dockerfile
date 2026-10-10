@@ -8,12 +8,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CONF_THRESHOLD=0.5 \
     IMG_SIZE=480 \
     FRAME_SKIP=2 \
-    CAMERA_SOURCE=0
+    CAMERA_SOURCE=0 \
+    FACE_ENABLE=1 \
+    FACE_SCORE=0.6 \
+    FACE_MODEL=/app/models/yunet.onnx
 
 # opencv + torch dependency
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
-    v4l-utils \
+    v4l-utils curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -24,6 +27,10 @@ COPY app/ ./app/
 
 # model pre-download (build cache, runtime eo download hobe jodi na thake)
 RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
+RUN mkdir -p /app/models && \
+    curl -L -o /app/models/yunet.onnx \
+    https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx && \
+    ls -lh /app/models/yunet.onnx
 
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

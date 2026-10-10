@@ -15,12 +15,13 @@ IMGSZ = int(os.getenv("IMG_SIZE", "480"))  # RK3576 CPU er jonno 480 fast
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "2"))  # proti N frame por por infer
 JPEG_Q = int(os.getenv("JPEG_QUALITY", "75"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
+FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 
-app = FastAPI(title="AI Camera - Human Detector (RK3576)")
+app = FastAPI(title="AI Camera - Human + Face Detector (RK3576)")
 
 camera = CameraStream()
 detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
-                         window_sec=WINDOW_SEC)
+                         window_sec=WINDOW_SEC, face_enable=FACE_ENABLE)
 camera.start()
 
 _last_annotated = None
@@ -28,7 +29,7 @@ _frame_id = 0
 
 HTML_PAGE = """
 <!doctype html>
-<html><head><meta charset="utf-8"><title>AI Camera - Human Detector</title>
+<html><head><meta charset="utf-8"><title>AI Camera - Human + Face</title>
 <style>
 body{background:#111;color:#eee;font-family:sans-serif;text-align:center;margin:0}
 header{padding:12px;background:#000;font-size:20px}
@@ -39,20 +40,20 @@ img{max-width:96vw;border:3px solid #333;border-radius:8px;margin-top:10px}
 a{color:#4fc3f7}
 </style></head>
 <body>
-<header>AI Camera - Human / Non-Human (YOLOv11n) - RK3576</header>
+<header>AI Camera - Human / Face (YOLOv11n + YuNet) - RK3576</header>
 <img src="/video_feed" />
 <div><div class="panel" id="s">loading stats... (1s update)</div></div>
-<div class="info">Green box = <b>Human</b> | Orange box = <b>Non-Human</b> |
-<a href="/api/stats">stats JSON</a> | <a href="/api/health">health</a></div>
+<div class="info">Green = <b>Human</b> | Orange = <b>Non-Human</b> | Cyan = <b>Face</b> |
+<a href="/api/stats">stats JSON</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></div>
 <script>
 async function tick(){
   try{
     const r = await fetch('/api/stats'); const j = await r.json();
     const s = j.smoothed;
     document.getElementById('s').innerHTML =
-      `Stable(1s) <b>Human:${s.stable_human}</b> Non-Human:${s.stable_non_human} | ` +
-      `mean:${s.human.mean} median:${s.human.median} mode:${s.human.mode} | ` +
-      `instant H:${j.instant.human} N:${j.instant.non_human} FPS:${j.instant.fps}`;
+      `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> N:${s.stable_non_human} | ` +
+      `face mean:${s.face.mean} median:${s.face.median} mode:${s.face.mode} | ` +
+      `instant H:${j.instant.human} F:${j.instant.face} FPS:${j.instant.fps}`;
   }catch(e){}
 }
 setInterval(tick, 1000); tick();
@@ -69,7 +70,15 @@ def index():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "camera_connected": camera.connected,
-            "model": MODEL_NAME, "conf": CONF, "imgsz": IMGSZ}
+            "model": MODEL_NAME, "conf": CONF, "imgsz": IMGSZ,
+            "face_enabled": FACE_ENABLE,
+            "face_loaded": detector.face_enabled}
+
+
+@app.get("/api/faces")
+def faces():
+    return {"faces": detector.last_faces, "count": detector.last_counts.get("face", 0),
+            "time": time.time()}
 
 
 @app.get("/api/stats")
