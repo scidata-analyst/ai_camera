@@ -16,6 +16,8 @@ FRAME_SKIP = int(os.getenv("FRAME_SKIP", "2"))  # proti N frame por por infer
 JPEG_Q = int(os.getenv("JPEG_QUALITY", "75"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
+FLIP_H = os.getenv("FLIP_H", "0") == "1"
+FLIP_V = os.getenv("FLIP_V", "0") == "1"
 
 app = FastAPI(title="AI Camera - Human + Face Detector (RK3576)")
 
@@ -23,6 +25,19 @@ camera = CameraStream()
 detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
                          window_sec=WINDOW_SEC, face_enable=FACE_ENABLE)
 camera.start()
+
+_flip = {"h": FLIP_H, "v": FLIP_V}
+
+
+def apply_flip(frame):
+    h, v = _flip["h"], _flip["v"]
+    if h and v:
+        return cv2.flip(frame, -1)
+    if h:
+        return cv2.flip(frame, 1)
+    if v:
+        return cv2.flip(frame, 0)
+    return frame
 
 _last_annotated = None
 _frame_id = 0
@@ -43,6 +58,11 @@ a{color:#4fc3f7}
 <header>AI Camera - Human / Face (YOLOv11n + YuNet) - RK3576</header>
 <img src="/video_feed" />
 <div><div class="panel" id="s">loading stats... (1s update)</div></div>
+<div style="margin:8px">
+<button onclick="setFlip('h')">Flip H: <span id="fh">-</span></button>
+<button onclick="setFlip('v')">Flip V: <span id="fv">-</span></button>
+<button onclick="resetFlip()">Reset</button>
+</div>
 <div class="info">Green = <b>Human</b> | Orange = <b>Non-Human</b> | Cyan = <b>Face</b> |
 <a href="/api/stats">stats JSON</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></div>
 <script>
@@ -54,7 +74,17 @@ async function tick(){
       `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> N:${s.stable_non_human} | ` +
       `face mean:${s.face.mean} median:${s.face.median} mode:${s.face.mode} | ` +
       `instant H:${j.instant.human} F:${j.instant.face} FPS:${j.instant.fps}`;
+    document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
+    document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';
   }catch(e){}
+}
+async function setFlip(axis){
+  await fetch('/api/flip/toggle?axis='+axis, {method:'POST'});
+  tick();
+}
+async function resetFlip(){
+  await fetch('/api/flip/set?h=0&v=0', {method:'POST'});
+  tick();
 }
 setInterval(tick, 1000); tick();
 </script>
@@ -86,14 +116,45 @@ def stats():
     return {"camera_connected": camera.connected,
             "instant": detector.last_counts,
             "smoothed": detector.smoothed,
+            "flip": _flip,
             "window_sec": WINDOW_SEC,
             "time": time.time()}
+
+
+@app.get("/api/flip")
+def get_flip():
+    return _flip
+
+
+@app.post("/api/flip/set")
+def set_flip(h: int = None, v: int = None):
+    global _last_annotated
+    if h is not None:
+        _flip["h"] = bool(int(h))
+    if v is not None:
+        _flip["v"] = bool(int(v))
+    _last_annotated = None  # purono orientation clear, blink/rokom glitch off
+    return _flip
+
+
+@app.post("/api/flip/toggle")
+def toggle_flip(axis: str = "h"):
+    global _last_annotated
+    if axis in ("h", "horizontal"):
+        _flip["h"] = not _flip["h"]
+    elif axis in ("v", "vertical"):
+        _flip["v"] = not _flip["v"]
+    elif axis in ("both", "180"):
+        _flip["h"] = not _flip["h"]
+        _flip["v"] = not _flip["v"]
+    _last_annotated = None
+    return _flip
 
 
 def gen_frames():
     global _last_annotated, _frame_id
     while True:
-        frame = camera.read()
+        frame = apply_flip(camera.read())
         _frame_id += 1
         # RK3576 CPU bachate frame skip — skip frame e ager annotated tai pathao,
         # raw frame pathale box on/off hoye blink kore.
