@@ -22,5 +22,7 @@ services:
       - FACE_ENABLE=1
       - FACE_SCORE=0.6
       - FACE_MODEL=/app/models/yunet.onnx
+      - FLIP_H=0
+      - FLIP_V=0
     restart: unless-stopped
     # privileged: true  # dorkar hole uncomment (camera permission issue)
