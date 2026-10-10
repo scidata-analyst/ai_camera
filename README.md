@@ -1,8 +1,9 @@
-# AI Camera — Human Detector (RK3576 + Docker + YOLOv11n)
+# AI Camera — Human + Face Detector (RK3576 + Docker + YOLOv11n + YuNet)
 
-USB webcam (`/dev/video0`) theke frame niye YOLOv11n diye detect kore.
+USB webcam (`/dev/video0`) theke frame niye YOLOv11n + YuNet diye detect kore.
 - `person` (class 0) -> **Human** (green box)
 - onno sob class -> **Non-Human** (orange box)
+- YuNet -> **Face** (cyan box + 5 landmark dot: eyes, nose, mouth)
 - Live MJPEG stream: `http://localhost:8080`
 
 ## Quick start (RK3576 / Linux)
@@ -19,6 +20,7 @@ docker compose up --build
 http://localhost:8080
 http://localhost:8080/video_feed
 http://localhost:8080/api/stats
+http://localhost:8080/api/faces
 http://localhost:8080/api/health
 ```
 
@@ -34,6 +36,14 @@ http://localhost:8080/api/health
 | FRAME_WIDTH/HEIGHT | 640x480 | camera resolution |
 | JPEG_QUALITY | 75 | stream quality |
 | SMOOTH_WINDOW | 1.0 | 1 sec window te mean/median/mode, stable = mode |
+| FACE_ENABLE | 1 | 0 korle face off |
+| FACE_SCORE | 0.6 | YuNet conf threshold |
+| FACE_MODEL | /app/models/yunet.onnx | auto-download hoy |
+
+## Face (YuNet) result
+- Per face: `box [x1,y1,x2,y2]` + `conf` + `landmarks[5]` (eyes, nose, mouth corners).
+- `/api/faces` e JSON, video te cyan box + red dot.
+- Smoothing face er jonneo 1-sec mean/median/mode hoy.
 
 ## Smoothing (1 sec update)
 - Proti frame er `human/non_human` count 1-sec sliding window e joma hoy.
