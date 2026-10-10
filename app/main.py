@@ -14,11 +14,13 @@ CONF = float(os.getenv("CONF_THRESHOLD", "0.5"))
 IMGSZ = int(os.getenv("IMG_SIZE", "480"))  # RK3576 CPU er jonno 480 fast
 FRAME_SKIP = int(os.getenv("FRAME_SKIP", "2"))  # proti N frame por por infer
 JPEG_Q = int(os.getenv("JPEG_QUALITY", "75"))
+WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 
 app = FastAPI(title="AI Camera - Human Detector (RK3576)")
 
 camera = CameraStream()
-detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ)
+detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
+                         window_sec=WINDOW_SEC)
 camera.start()
 
 _last_annotated = None
@@ -32,13 +34,29 @@ body{background:#111;color:#eee;font-family:sans-serif;text-align:center;margin:
 header{padding:12px;background:#000;font-size:20px}
 img{max-width:96vw;border:3px solid #333;border-radius:8px;margin-top:10px}
 .info{color:#aaa;margin:10px}
+.panel{background:#1e1e1e;display:inline-block;padding:10px 18px;border-radius:8px;margin-top:8px}
+.panel b{color:#4fc3f7}
 a{color:#4fc3f7}
 </style></head>
 <body>
 <header>AI Camera - Human / Non-Human (YOLOv11n) - RK3576</header>
 <img src="/video_feed" />
+<div><div class="panel" id="s">loading stats... (1s update)</div></div>
 <div class="info">Green box = <b>Human</b> | Orange box = <b>Non-Human</b> |
 <a href="/api/stats">stats JSON</a> | <a href="/api/health">health</a></div>
+<script>
+async function tick(){
+  try{
+    const r = await fetch('/api/stats'); const j = await r.json();
+    const s = j.smoothed;
+    document.getElementById('s').innerHTML =
+      `Stable(1s) <b>Human:${s.stable_human}</b> Non-Human:${s.stable_non_human} | ` +
+      `mean:${s.human.mean} median:${s.human.median} mode:${s.human.mode} | ` +
+      `instant H:${j.instant.human} N:${j.instant.non_human} FPS:${j.instant.fps}`;
+  }catch(e){}
+}
+setInterval(tick, 1000); tick();
+</script>
 </body></html>
 """
 
@@ -57,7 +75,9 @@ def health():
 @app.get("/api/stats")
 def stats():
     return {"camera_connected": camera.connected,
-            "detections": detector.last_counts,
+            "instant": detector.last_counts,
+            "smoothed": detector.smoothed,
+            "window_sec": WINDOW_SEC,
             "time": time.time()}
 
 
@@ -66,12 +86,12 @@ def gen_frames():
     while True:
         frame = camera.read()
         _frame_id += 1
-        # RK3576 CPU bachate frame skip
+        # RK3576 CPU bachate frame skip — skip frame e ager annotated tai pathao,
+        # raw frame pathale box on/off hoye blink kore.
         if _frame_id % FRAME_SKIP == 0 or _last_annotated is None:
             annotated, _ = detector.infer(frame)
             _last_annotated = annotated
-        else:
-            _last_annotated = frame  # skip frame e raw
+        # else: _last_annotated hold koro (blink fix)
         ok, buf = cv2.imencode(".jpg", _last_annotated,
                                [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_Q])
         if not ok:
