@@ -44,6 +44,7 @@ class YuNetFace:
                 cv2.dnn.DNN_TARGET_CPU,
             )
             self.model_path = path
+            self._last_hw = None  # LAG FIX: setInputSize cache
         except Exception as e:
             print(f"[face] YuNet disabled: {e}")
             self.detector = None
@@ -53,8 +54,10 @@ class YuNetFace:
         if self.detector is None:
             return []
         h, w = frame.shape[:2]
-        self.detector.setInputSize((w, h))
-        self.detector.setScoreThreshold(self.score_thr)
+        # LAG FIX: size same thakle setInputSize skip (proti frame e costly)
+        if self._last_hw != (w, h):
+            self.detector.setInputSize((w, h))
+            self._last_hw = (w, h)
         _, faces = self.detector.detect(frame)
         out = []
         if faces is None:

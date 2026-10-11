@@ -81,11 +81,28 @@ class MiVOLOAgeGender:
         import time  # noqa: F401 (cache timestamp er jonno)
         import torch
 
+        # LAG FIX: torch thread cap — default sob core nile
+        # YOLO+ONNX er sathe fight kore sob slow hoy
+        try:
+            nth = int(os.getenv("TORCH_THREADS",
+                                str(min(4, (os.cpu_count() or 4)))))
+            torch.set_num_threads(max(1, nth))
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
+        try:
+            torch.backends.cudnn.benchmark = False
+        except Exception:
+            pass
+
         self.enabled = os.getenv("MIVOLO_ENABLE", "1") == "1"
         # Face cache: ekoi face e bar bar heavy model chalano lage na.
         # IoU match + refresh window per refresh_sec por 1 bar re-check.
         self.refresh_sec = float(os.getenv("MIVOLO_REFRESH", "1.0"))
         self.iou_thr = float(os.getenv("MIVOLO_IOU", "0.4"))
+        # LAG FIX: 1 infer call e max koyta face e model cholbe.
+        # baki gulo stale/cache reuse -> 5 face e 5s block hoy na.
+        self.max_faces = int(os.getenv("MIVOLO_MAX_FACES", "1"))
         # 2-sec window: oi somoyer readings er median/majority publish hoy.
         self.window_sec = float(os.getenv("MIVOLO_WINDOW", "2.0"))
         # Blur threshold: er niche sharpness hole refresh off (movement blur
@@ -218,8 +235,14 @@ class MiVOLOAgeGender:
         if self.model is None:
             return faces
         H, W = frame.shape[:2]
+        # LAG FIX: boro face age (gender er jonno important), choto pore
+        order = sorted(range(len(faces)), key=lambda i: -(
+            (faces[i]["box"][2] - faces[i]["box"][0]) *
+            (faces[i]["box"][3] - faces[i]["box"][1])))
         todo = []  # (face_dict, face_crop_or_None, body_crop_or_None)
-        for fc in faces:
+        deferred = []  # max_faces er bahire -> stale reuse, block korbe na
+        for i in order:
+            fc = faces[i]
             x1, y1, x2, y2 = fc["box"]
             if min(x2 - x1, y2 - y1) < min_side:
                 fc.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
@@ -255,7 +278,21 @@ class MiVOLOAgeGender:
                 bx2, by2 = min(b[2], W), min(b[3], H)
                 if bx2 > bx1 and by2 > by1:
                     bcrop = frame[by1:by2, bx1:bx2]
+            # LAG FIX: 1 frame e max_faces er besi model chalabe na
+            if len(todo) >= max(1, self.max_faces):
+                deferred.append(fc)
+                continue
             todo.append((fc, fcrop, bcrop))
+
+        # deferred face gulo stale/cache diye fill (0ms, block na)
+        for fc in deferred:
+            stale = self._stale(fc["box"])
+            if stale is not None:
+                g, gc, a = stale
+                self.hits += 1
+                fc.update({"gender": g, "gconf": gc, "age": a})
+            else:
+                fc.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
 
         if not todo:
             return faces
@@ -267,7 +304,8 @@ class MiVOLOAgeGender:
             b_in = self.processor(images=[t[2] for t in todo])["pixel_values"]
             f_in = f_in.to(dtype=torch.float32)
             b_in = b_in.to(dtype=torch.float32)
-            with torch.no_grad():
+            # LAG FIX: inference_mode + no_grad er cheye kom overhead
+            with torch.inference_mode():
                 out = self.model(faces_input=f_in, body_input=b_in)
             self.last_ms = round((time.time() - t0) * 1000, 1)
             self.runs += 1
