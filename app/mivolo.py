@@ -84,10 +84,10 @@ class MiVOLOAgeGender:
         self.enabled = os.getenv("MIVOLO_ENABLE", "1") == "1"
         # Face cache: ekoi face e bar bar heavy model chalano lage na.
         # IoU match + refresh window per refresh_sec por 1 bar re-check.
-        self.refresh_sec = float(os.getenv("MIVOLO_REFRESH", "5.0"))
+        self.refresh_sec = float(os.getenv("MIVOLO_REFRESH", "1.0"))
         self.iou_thr = float(os.getenv("MIVOLO_IOU", "0.4"))
-        # 1-sec window: proti sec er readings er median/majority publish hoy.
-        self.window_sec = float(os.getenv("SMOOTH_WINDOW", "1.0"))
+        # 2-sec window: oi somoyer readings er median/majority publish hoy.
+        self.window_sec = float(os.getenv("MIVOLO_WINDOW", "2.0"))
         # Blur threshold: er niche sharpness hole refresh off (movement blur
         # e vul age ase). 0 korle check off.
         self.blur_thr = float(os.getenv("MIVOLO_BLUR", "80"))
