@@ -24,7 +24,7 @@ services:
       - FACE_MIN_SIZE=60   # choto face e gender off (vul komate)
       - MIVOLO_ENABLE=1
       - MIVOLO_MODEL=iitolstykh/mivolo_v2
-      - MIVOLO_REFRESH=5.0  # proti face e eto sec por por re-check (komale sec e beshi reading, CPU beshi)
+      - MIVOLO_REFRESH=1.0  # proti sec e re-check -> sec proti median (barale CPU kombbe)
       - MIVOLO_BLUR=80  # er niche sharpness hole age refresh off (motion blur fix)
       - HEADPOSE_ENABLE=1
       - HEADPOSE_MODEL=/app/models/whenet.onnx

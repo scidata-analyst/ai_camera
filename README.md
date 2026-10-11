@@ -42,7 +42,7 @@ http://localhost:8080/api/health
 | FACE_MIN_SIZE | 60 | choto face e gender Unknown (vul prediction komate) |
 | MIVOLO_ENABLE | 1 | 0 korle age/gender off |
 | MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
-| MIVOLO_REFRESH | 5.0 | ekoi face e eto sec por por re-check (cache fast) |
+| MIVOLO_REFRESH | 1.0 | proti sec e re-check -> sec proti median (barale CPU kombbe) |
 | MIVOLO_BLUR | 80 | er niche sharpness hole age refresh off (motion blur fix) |
 | HEADPOSE_ENABLE | 1 | 0 korle looking off |
 | HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
@@ -63,8 +63,8 @@ http://localhost:8080/api/health
 - Input dual: YuNet face crop + YOLO human box (body); body na pele face-only.
 - Video label: `M0.91 27y` / `F0.93 24y`; `/api/faces` e full JSON; header e `M:x W:y` count.
 - Note: MiVOLO vari (28.7M, ~1s/face CPU) — tai face cache ache: ekoi face e
-  model 1 bar chole, tarpor 5s porjonto cache theke (0ms). Notun/norechora
-  face e 1 bar slow hobe, stream atkabe na (background thread).
+  proti sec e 1 bar re-check hoy, majher frame e cache theke (0ms).
+  1-sec window er readings er median/majority = oi sec er result.
 - **Movement fix:** blurry frame (motion blur) ba side-face e age refresh hoy na —
   ager valoi thake; proti 1-sec window er readings er **median age + majority gender**
   publish hoy (window khali thakle ager stable value thake).
