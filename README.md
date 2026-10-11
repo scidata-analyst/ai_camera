@@ -43,6 +43,7 @@ http://localhost:8080/api/health
 | MIVOLO_ENABLE | 1 | 0 korle age/gender off |
 | MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
 | MIVOLO_REFRESH | 5.0 | ekoi face e eto sec por por re-check (cache fast) |
+| MIVOLO_BLUR | 80 | er niche sharpness hole age refresh off (motion blur fix) |
 | HEADPOSE_ENABLE | 1 | 0 korle looking off |
 | HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
 | LOOK_YAW / LOOK_PITCH | 25 / 20 | looking threshold degree |
@@ -64,6 +65,9 @@ http://localhost:8080/api/health
 - Note: MiVOLO vari (28.7M, ~1s/face CPU) — tai face cache ache: ekoi face e
   model 1 bar chole, tarpor 5s porjonto cache theke (0ms). Notun/norechora
   face e 1 bar slow hobe, stream atkabe na (background thread).
+- **Movement fix:** blurry frame (motion blur) ba side-face e age refresh hoy na —
+  ager valoi thake; proti 1-sec window er readings er **median age + majority gender**
+  publish hoy (window khali thakle ager stable value thake).
 - Bachcha/side-face e age ±5y hote pare.
 
 ## Face (YuNet) result
