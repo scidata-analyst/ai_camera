@@ -13,8 +13,9 @@ from .detector import HumanDetector
 
 MODEL_NAME = os.getenv("MODEL_NAME", "yolo11n.pt")
 CONF = float(os.getenv("CONF_THRESHOLD", "0.5"))
-IMGSZ = int(os.getenv("IMG_SIZE", "384"))  # 320=fast, 480=accurate, 384=balance
-JPEG_Q = int(os.getenv("JPEG_QUALITY", "70"))
+IMGSZ = int(os.getenv("IMG_SIZE", "320"))  # LAG FIX: 384->320 default (CPU ~40% fast)
+JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))  # 70->60: encode fast + bandwidth kom
+STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 MIVOLO_ENABLE = os.getenv("MIVOLO_ENABLE", "1") == "1"
@@ -22,6 +23,19 @@ HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
 FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face e gender off
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
+
+# LAG FIX: thread pinning — sob lib sob core nile context-switch e lag
+try:
+    import torch as _torch
+    _nth = int(os.getenv("TORCH_THREADS", str(min(4, (os.cpu_count() or 4)))))
+    _torch.set_num_threads(max(1, _nth))
+    _torch.set_num_interop_threads(1)
+except Exception:
+    pass
+try:
+    cv2.setNumThreads(max(1, min(4, int(os.getenv("TORCH_THREADS", "4")))))
+except Exception:
+    pass
 
 app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)")
 
@@ -68,6 +82,9 @@ def _infer_loop():
             _infer_fps = _infer_fps * 0.9 + inst * 0.1
             with _out_lock:
                 _latest_annotated = annotated
+            # LAG FIX: tight loop e CPU 100% kheye stream thread ke starve
+            # korto. choto yield — infer fps kome na, stream smooth hoy.
+            time.sleep(0.005)
         except Exception as e:
             print(f"[infer] {e}")
             time.sleep(0.2)
@@ -197,11 +214,14 @@ def toggle_flip(axis: str = "h"):
 
 
 def gen_frames():
+    interval = 1.0 / max(1.0, STREAM_FPS)
     while True:
+        t0 = time.time()
+        # LAG FIX: lock er ভিতরে copy() korle infer thread block hoto.
+        # age reference nao, lock charo, tarpor copy.
         with _out_lock:
-            img = _latest_annotated
-            if img is not None:
-                img = img.copy()
+            ref = _latest_annotated
+        img = ref.copy() if ref is not None else None
         if img is None:
             img = apply_flip(camera.read())  # infer ready howar age raw
         ok, buf = cv2.imencode(".jpg", img,
@@ -210,7 +230,9 @@ def gen_frames():
             continue
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                + buf.tobytes() + b"\r\n")
-        time.sleep(0.033)  # ~30fps stream, infer theke independent
+        # fixed 33ms na — STREAM_FPS onujayi, encode time bad diye
+        dt = time.time() - t0
+        time.sleep(max(0.0, interval - dt))
 
 
 @app.get("/video_feed")

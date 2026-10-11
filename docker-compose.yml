@@ -13,10 +13,16 @@ services:
       - CAMERA_SOURCE=0
       - MODEL_NAME=yolo11n.pt
       - CONF_THRESHOLD=0.5
-      - IMG_SIZE=384      # 320=fast, 480=accurate, 384=balance
+      - IMG_SIZE=320      # LAG FIX: 384->320 (RK3576 CPU ~40% fast)
       - FRAME_WIDTH=640
       - FRAME_HEIGHT=480
-      - JPEG_QUALITY=70
+      - JPEG_QUALITY=60   # 70->60 encode fast
+      - STREAM_FPS=25
+      - SMOOTH_WINDOW=1.0  # 1 sec por por mean/median/mode update
+      - DETECT_EVERY=2    # YOLO proti 2 frame e 1 bar (box reuse)
+      - MAX_FACES=3       # sobcheye boro 3 face e headpose
+      - TORCH_THREADS=4
+      - ORT_THREADS=2
       - SMOOTH_WINDOW=1.0  # 1 sec por por mean/median/mode update
       - FACE_ENABLE=1
       - FACE_SCORE=0.6
@@ -24,7 +30,8 @@ services:
       - FACE_MIN_SIZE=60   # choto face e gender off (vul komate)
       - MIVOLO_ENABLE=1
       - MIVOLO_MODEL=iitolstykh/mivolo_v2
-      - MIVOLO_REFRESH=1.0  # proti sec e re-check -> sec proti median (barale CPU kombbe)
+      - MIVOLO_REFRESH=2.0  # LAG FIX: 1.0->2.0 (heavy model, CPU half)
+      - MIVOLO_MAX_FACES=1  # 1 frame e max 1 face e MiVOLO
       - MIVOLO_BLUR=80  # er niche sharpness hole age refresh off (motion blur fix)
       - HEADPOSE_ENABLE=1
       - HEADPOSE_MODEL=/app/models/whenet.onnx

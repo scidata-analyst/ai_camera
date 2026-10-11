@@ -1,10 +1,18 @@
 """YOLOv11 based Human vs Non-Human detector."""
+import os
 import threading
 import time
 from typing import List, Dict
 
 import cv2
 import numpy as np
+
+# LAG FIX: CPU thread fight komao (torch + onnx + cv2)
+try:
+    _NTH = int(os.getenv("TORCH_THREADS", str(min(4, (os.cpu_count() or 4)))))
+    cv2.setNumThreads(max(1, min(4, _NTH)))
+except Exception:
+    pass
 
 from .smoother import CountSmoother
 from .face_detector import YuNetFace
@@ -42,39 +50,67 @@ class HumanDetector:
         self.smoothed = self.smoother.current
         self._t_prev = time.time()
         self._fps_smooth = 0.0
+        # LAG FIX: YOLO proti frame e na chaliye reuse koro.
+        # DETECT_EVERY=2 mane 2 bar er moddhe 1 bar YOLO, majhe box reuse.
+        # RK3576 CPU te ~2x infer fps bare.
+        self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
+        self.max_faces = max(1, int(os.getenv("MAX_FACES", "3")))
+        self._frame_no = 0
+        self._last_dets: List[Dict] = []
+
+    def _run_yolo(self, frame: np.ndarray):
+        with self._lock:
+            results = self.model.predict(
+                source=frame, conf=self.conf, imgsz=self.imgsz,
+                verbose=False, half=False, augment=False,
+                agnostic_nms=True, max_det=20,
+            )[0]
+        return results
 
     def infer(self, frame: np.ndarray) -> tuple[np.ndarray, List[Dict]]:
         """Run detection, draw boxes, return (annotated_frame, detections)."""
-        with self._lock:
-            results = self.model.predict(
-                source=frame, conf=self.conf, imgsz=self.imgsz, verbose=False
-            )[0]
+        self._frame_no += 1
+        # LAG FIX: proti N frame e 1 bar YOLO, majhe ager box reuse.
+        # Face/YuNet proti bar chole (sosta), YOLO skip holeo video atke na.
+        run_yolo = (self._frame_no % self.detect_every == 1) or not self._last_dets
 
         detections: List[Dict] = []
         human_n = 0
         non_human_n = 0
 
-        for box in results.boxes:
-            cls_id = int(box.cls[0])
-            conf = float(box.conf[0])
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            coco_name = self.names.get(cls_id, str(cls_id))
+        if run_yolo:
+            results = self._run_yolo(frame)
+            for box in results.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                coco_name = self.names.get(cls_id, str(cls_id))
 
-            if cls_id == 0:  # person
-                label = f"Human {conf:.2f}"
+                if cls_id == 0:  # person
+                    kind = "human"
+                    human_n += 1
+                else:
+                    kind = "non_human"
+                    non_human_n += 1
+
+                detections.append(
+                    {"kind": kind, "class": coco_name, "conf": round(conf, 3),
+                     "box": [x1, y1, x2, y2]}
+                )
+            self._last_dets = [dict(d) for d in detections]
+        else:
+            detections = [dict(d) for d in self._last_dets]
+            human_n = sum(1 for d in detections if d["kind"] == "human")
+            non_human_n = sum(1 for d in detections if d["kind"] == "non_human")
+
+        for d in detections:
+            x1, y1, x2, y2 = d["box"]
+            if d["kind"] == "human":
+                label = f"Human {d['conf']:.2f}"
                 color = (0, 255, 0)  # green
-                kind = "human"
-                human_n += 1
             else:
-                label = f"Non-Human:{coco_name} {conf:.2f}"
+                label = f"Non-Human:{d['class']} {d['conf']:.2f}"
                 color = (0, 165, 255)  # orange
-                kind = "non_human"
-                non_human_n += 1
-
-            detections.append(
-                {"kind": kind, "class": coco_name, "conf": round(conf, 3),
-                 "box": [x1, y1, x2, y2]}
-            )
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
@@ -88,6 +124,14 @@ class HumanDetector:
         if self.face is not None:
             try:
                 faces = self.face.detect(frame)
+                # LAG FIX: sob face na — sobcheye boro MAX_FACES ta.
+                # choto/durer face e WHENet+MiVOLO chalano CPU noshto.
+                if len(faces) > self.max_faces:
+                    faces = sorted(
+                        faces,
+                        key=lambda f: -((f["box"][2] - f["box"][0]) *
+                                        (f["box"][3] - f["box"][1])),
+                    )[:self.max_faces]
                 if self.headpose is not None and faces:
                     faces = self.headpose.predict_frame(frame, faces)
                 # Gender+Age: sudhu boro/clear/frontal face e refresh

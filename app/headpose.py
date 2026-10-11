@@ -41,10 +41,20 @@ class HeadPoseEstimator:
             return
         try:
             path = ensure_model(model_path)
+            import onnxruntime as _ort
+            # LAG FIX: thread limit + graph opt -> CPU te fast, GIL block kom
+            import os as _os
+            nth = int(_os.getenv("ORT_THREADS",
+                                str(min(4, (_os.cpu_count() or 4)))))
+            so = _ort.SessionOptions()
+            so.intra_op_num_threads = max(1, nth)
+            so.inter_op_num_threads = 1
+            so.graph_optimization_level = (
+                _ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
             self.session = ort.InferenceSession(
-                path, providers=["CPUExecutionProvider"])
+                path, sess_options=so, providers=["CPUExecutionProvider"])
             self.input_name = self.session.get_inputs()[0].name
-            print(f"[headpose] loaded {path}")
+            print(f"[headpose] loaded {path} (threads={nth})")
         except Exception as e:
             print(f"[headpose] disabled: {e}")
             self.session = None
@@ -71,7 +81,11 @@ class HeadPoseEstimator:
         if self.session is None:
             return faces
         H, W = frame.shape[:2]
-        for fc in faces:
+        # LAG FIX: per-face run() er bodle 1 batch e chalao.
+        # 3 face hole 3x session.run overhead -> 1x hoy.
+        blobs, idxs = [], []
+        crops_meta = []
+        for i, fc in enumerate(faces):
             x1, y1, x2, y2 = fc["box"]
             w, h = x2 - x1, y2 - y1
             if min(w, h) < min_side:
@@ -89,13 +103,30 @@ class HeadPoseEstimator:
                            "looking": False})
                 continue
             try:
-                yaw, pitch, roll = self.predict_crop(crop)
-                looking = bool(abs(yaw) <= self.yaw_thr
-                               and abs(pitch) <= self.pitch_thr)
-                fc.update({"yaw": round(yaw, 1), "pitch": round(pitch, 1),
-                           "roll": round(roll, 1), "looking": looking})
+                img = cv2.resize(crop, (IN_SIZE, IN_SIZE))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img = np.transpose(img, (2, 0, 1))
+                blobs.append(img)
+                idxs.append(i)
             except Exception as e:
-                print(f"[headpose] predict fail: {e}")
+                print(f"[headpose] preprocess fail: {e}")
                 fc.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
                            "looking": False})
+        if blobs:
+            try:
+                batch = np.stack(blobs, axis=0).astype(np.float32)
+                out = self.session.run(None, {self.input_name: batch})[0]
+                for row, i in zip(out, idxs):
+                    yaw, roll, pitch = float(row[0]), float(row[1]), float(row[2])
+                    looking = bool(abs(yaw) <= self.yaw_thr
+                                   and abs(pitch) <= self.pitch_thr)
+                    faces[i].update({"yaw": round(yaw, 1),
+                                     "pitch": round(pitch, 1),
+                                     "roll": round(roll, 1),
+                                     "looking": looking})
+            except Exception as e:
+                print(f"[headpose] predict fail: {e}")
+                for i in idxs:
+                    faces[i].update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
+                                     "looking": False})
         return faces
