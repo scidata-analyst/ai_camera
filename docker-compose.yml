@@ -5,25 +5,41 @@ services:
     container_name: ai-camera
     ports:
       - "8080:8080"
+    # ---- RK3576 board devices ----
+    # /dev/video0  = USB webcam
+    # /dev/dri/*   = NPU/GPU render node (RKNNLite er jonno must)
+    # /dev/rknpu   = NPU core node (kernel onujayi naam vinno hote pare)
+    # /dev/mpp_service /dev/rga = Rockchip media/RGA (thakle map hobe)
+    # NOTE: kono node board e na thakle compose error dibe —
+    # tai shudhu ja ache tai rakho. Check: ls /dev | grep -E "video|dri|rknpu|mpp|rga"
     devices:
       - "/dev/video0:/dev/video0"  # USB webcam; na thakle line ta comment koro
+      - "/dev/dri:/dev/dri"        # NPU/GPU — .rknn chalate lagbe
+      # - "/dev/rknpu:/dev/rknpu"          # board e thakle uncomment (ls /dev | grep rknpu)
+      # - "/dev/mpp_service:/dev/mpp_service"  # Rockchip MPP decode lagle
+      # - "/dev/rga:/dev/rga"                # RGA hw resize lagle
     volumes:
-      - ./models:/root/.cache  # YOLO weight cache (optional)
+      - ./models:/root/.cache  # YOLO weight + HF cache (optional)
+      - ./models:/app/models   # yolo11n-rk3576.rknn ekhane rakho (NPU model share)
     environment:
       - CAMERA_SOURCE=0
-      - MODEL_NAME=yolo11n.pt
+      # NPU switch: auto = /app/models/yolo11n-rk3576.rknn thakle NPU, naile CPU
+      # force CPU চাইলে YOLO_BACKEND=cpu দাও
+      - YOLO_BACKEND=auto
+      - RKNN_MODEL=/app/models/yolo11n-rk3576.rknn
+      - RKNPU_CORE=AUTO  # AUTO | 0 | 1 | 2 (RK3576: 3 core)
+      - MODEL_NAME=yolo11n.pt  # CPU fallback model
       - CONF_THRESHOLD=0.5
-      - IMG_SIZE=320      # LAG FIX: 384->320 (RK3576 CPU ~40% fast)
+      - IMG_SIZE=320      # NPU te 320/640 duitai fast; CPU fallback er jonno 320
       - FRAME_WIDTH=640
       - FRAME_HEIGHT=480
       - JPEG_QUALITY=60   # 70->60 encode fast
       - STREAM_FPS=25
       - SMOOTH_WINDOW=1.0  # 1 sec por por mean/median/mode update
-      - DETECT_EVERY=2    # YOLO proti 2 frame e 1 bar (box reuse)
+      - DETECT_EVERY=2    # CPU mode e YOLO proti 2 frame e 1 bar; NPU te 1 o chole
       - MAX_FACES=3       # sobcheye boro 3 face e headpose
-      - TORCH_THREADS=4
+      - TORCH_THREADS=4   # RK3576: 4xA72+4xA53 — NPU chalu thakle 4 best
       - ORT_THREADS=2
-      - SMOOTH_WINDOW=1.0  # 1 sec por por mean/median/mode update
       - FACE_ENABLE=1
       - FACE_SCORE=0.6
       - FACE_MODEL=/app/models/yunet.onnx
@@ -40,4 +56,5 @@ services:
       - FLIP_H=0
       - FLIP_V=0
     restart: unless-stopped
-    # privileged: true  # dorkar hole uncomment (camera permission issue)
+    # NPU + camera permission issue hole uncomment koro:
+    # privileged: true  # dorkar hole uncomment (camera/NPU permission issue)
