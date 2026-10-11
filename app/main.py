@@ -111,7 +111,7 @@ async function tick(){
     document.getElementById('s').innerHTML =
       `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
       `M:${s.stable_male} W:${s.stable_female} Look:${j.instant.looking} | ` +
-      `instant M:${j.instant.male} W:${j.instant.female} infer:${j.infer_fps}fps`;
+      `infer:${j.infer_fps}fps MiVOLO run:${j.mivolo.runs} hit:${j.mivolo.hits}`;
     document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
     document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';
   }catch(e){}
@@ -157,11 +157,15 @@ def faces():
 
 @app.get("/api/stats")
 def stats():
+    mv = detector.mivolo
     return {"camera_connected": camera.connected,
             "instant": detector.last_counts,
             "smoothed": detector.smoothed,
             "flip": _flip,
             "infer_fps": round(_infer_fps, 1),
+            "mivolo": {"runs": mv.runs if mv else 0,
+                       "hits": mv.hits if mv else 0,
+                       "last_ms": mv.last_ms if mv else 0.0},
             "window_sec": WINDOW_SEC,
             "time": time.time()}
 

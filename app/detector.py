@@ -82,18 +82,19 @@ class HumanDetector:
             cv2.putText(frame, label, (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-        # YuNet face + MiVOLO age/gender + WHENet looking (body = YOLO human box)
+        # YuNet face -> WHENet looking -> MiVOLO age/gender (body = YOLO box).
+        # looking age ber hoy, jate blurry/side frame e age refresh off thake.
         faces = []
         if self.face is not None:
             try:
                 faces = self.face.detect(frame)
-                # Gender+Age: sudhu boro/clear face e (choto face = vul result)
+                if self.headpose is not None and faces:
+                    faces = self.headpose.predict_frame(frame, faces)
+                # Gender+Age: sudhu boro/clear/frontal face e refresh
                 if self.mivolo is not None and faces:
                     bodies = [d["box"] for d in detections if d["kind"] == "human"]
                     faces = self.mivolo.predict_frame(
                         frame, faces, bodies, min_side=self.face_min_size)
-                if self.headpose is not None and faces:
-                    faces = self.headpose.predict_frame(frame, faces)
                 YuNetFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")

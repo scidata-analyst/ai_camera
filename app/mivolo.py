@@ -86,7 +86,15 @@ class MiVOLOAgeGender:
         # IoU match + refresh window per refresh_sec por 1 bar re-check.
         self.refresh_sec = float(os.getenv("MIVOLO_REFRESH", "5.0"))
         self.iou_thr = float(os.getenv("MIVOLO_IOU", "0.4"))
+        # 1-sec window: proti sec er readings er median/majority publish hoy.
+        self.window_sec = float(os.getenv("SMOOTH_WINDOW", "1.0"))
+        # Blur threshold: er niche sharpness hole refresh off (movement blur
+        # e vul age ase). 0 korle check off.
+        self.blur_thr = float(os.getenv("MIVOLO_BLUR", "80"))
         self._cache = []  # {box, gender, gconf, age, t}
+        self.runs = 0   # model forward count (cache miss)
+        self.hits = 0   # cache hit count
+        self.last_ms = 0.0  # last forward time
         self.model = None
         self.processor = None
         self.torch = torch
@@ -138,16 +146,54 @@ class MiVOLOAgeGender:
             return best["gender"], best["gconf"], best["age"]
         return None
 
+    def _stale(self, box):
+        """Somoy par holeo ager value (blur/side frame e reuse er jonno)."""
+        best, best_iou = None, 0.0
+        for c in self._cache:
+            iou = self._iou(box, c["box"])
+            if iou > best_iou:
+                best, best_iou = c, iou
+        if best is not None and best_iou >= self.iou_thr:
+            best["box"] = box
+            return best["gender"], best["gconf"], best["age"]
+        return None
+
+    @staticmethod
+    def _blur_score(crop: np.ndarray) -> float:
+        """Laplacian variance — kom mane blurry. (0-1000+ scale)"""
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
     def _store(self, box, gender, gconf, age):
+        """1-sec window median (age) + majority (gender).
+
+        Window er ভিতরে jotogulo reading, tar median/majority = stable result.
+        Window khali thakle ager stable value thake (Unknown hoy na).
+        """
+        import collections
+        import statistics
         import time
+        now = time.time()
         for c in self._cache:
             if self._iou(box, c["box"]) >= self.iou_thr:
-                c.update({"box": box, "gender": gender,
-                          "gconf": gconf, "age": age, "t": time.time()})
-                return
+                c["ages"] = [(t, a) for (t, a) in c.get("ages", []) + [(now, age)]
+                             if now - t <= max(self.window_sec, 5.0)][-10:]
+                c["genders"] = [(t, g) for (t, g) in c.get("genders", []) + [(now, gender)]
+                                if now - t <= max(self.window_sec, 5.0)][-10:]
+                win_a = [a for (t, a) in c["ages"] if now - t <= self.window_sec]
+                win_g = [g for (t, g) in c["genders"] if now - t <= self.window_sec]
+                med = int(statistics.median(win_a)) if win_a else c.get("age", age)
+                top = collections.Counter(win_g).most_common(1)[0][0] if win_g \
+                    else c.get("gender", gender)
+                c.update({"box": box, "gender": top,
+                          "gconf": gconf, "age": med, "t": now})
+                return top, med
         self._cache.append({"box": box, "gender": gender,
-                            "gconf": gconf, "age": age, "t": time.time()})
+                            "gconf": gconf, "age": age,
+                            "ages": [(now, age)], "genders": [(now, gender)],
+                            "t": now})
         self._cache = self._cache[-20:]  # memory bound
+        return gender, age
 
     @staticmethod
     def _body_for_face(face_box, bodies):
@@ -163,8 +209,11 @@ class MiVOLOAgeGender:
                       min_side: int = 60):
         """faces e gender/age bosiye dey.
 
-        Cache hit (ekoi face) -> model skip (fast).
-        Sudhu NOTUN / norachora face e batched forward (slow, ~1s).
+        - Fresh cache -> model skip (fast).
+        - Refresh time holeo blurry/side face hole ager value reuse (vul age off).
+        - Sudhu clear + frontal NOTUN frame e model chole.
+        - Age = sesh 5 reading er median (flicker-free).
+        (looking flag headpose theke ase — detector e headpose age chole.)
         """
         if self.model is None:
             return faces
@@ -178,6 +227,7 @@ class MiVOLOAgeGender:
             hit = self._cached(fc["box"])
             if hit is not None:  # cache: model chalano laglo na
                 g, gc, a = hit
+                self.hits += 1
                 fc.update({"gender": g, "gconf": gc, "age": a})
                 continue
             x1c, y1c = max(x1, 0), max(y1, 0)
@@ -186,6 +236,18 @@ class MiVOLOAgeGender:
             if fcrop.size == 0:
                 fc.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
                 continue
+            # Refresh gate: blurry ba side-face hole ager value reuse koro.
+            # (prothombar cache na thakle tao chalao — kichu na thakar cheye valo)
+            stale = self._stale(fc["box"])
+            if stale is not None:
+                blurry = self.blur_thr > 0 and \
+                    self._blur_score(fcrop) < self.blur_thr
+                side = fc.get("looking") is False
+                if blurry or side:
+                    g, gc, a = stale
+                    self.hits += 1
+                    fc.update({"gender": g, "gconf": gc, "age": a})
+                    continue
             b = self._body_for_face(fc["box"], bodies)
             bcrop = None
             if b is not None:
@@ -198,13 +260,17 @@ class MiVOLOAgeGender:
         if not todo:
             return faces
         try:
+            import time
             torch = self.torch
+            t0 = time.time()
             f_in = self.processor(images=[t[1] for t in todo])["pixel_values"]
             b_in = self.processor(images=[t[2] for t in todo])["pixel_values"]
             f_in = f_in.to(dtype=torch.float32)
             b_in = b_in.to(dtype=torch.float32)
             with torch.no_grad():
                 out = self.model(faces_input=f_in, body_input=b_in)
+            self.last_ms = round((time.time() - t0) * 1000, 1)
+            self.runs += 1
             ages = out.age_output.detach().cpu().view(-1).tolist()
             gidx = out.gender_class_idx.detach().cpu().view(-1).tolist()
             gprob = out.gender_probs.detach().cpu().view(-1).tolist()
@@ -214,8 +280,8 @@ class MiVOLOAgeGender:
                     "Female" if g.lower().startswith("f") else g)
                 gc = round(float(gp), 3)
                 ag = max(0, min(int(round(float(a))), 100))
-                fc.update({"gender": g, "gconf": gc, "age": ag})
-                self._store(fc["box"], g, gc, ag)
+                top, med = self._store(fc["box"], g, gc, ag)
+                fc.update({"gender": top, "gconf": gc, "age": med})
         except Exception as e:
             print(f"[mivolo] predict fail: {e}")
             for fc, _, _ in todo:
