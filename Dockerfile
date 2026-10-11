@@ -1,4 +1,5 @@
 FROM python:3.11-slim
+ARG TARGETARCH
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -41,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<81" wheel && \
-    if [ "$(uname -m)" = "aarch64" ]; then \
+    if [ "$(uname -m)" = "aarch64" ] || [ "$TARGETARCH" = "arm64" ]; then \
       pip install --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu torch torchvision; \
     fi && \
     pip install --retries 5 --timeout 120 -r requirements.txt && \
