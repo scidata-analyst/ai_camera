@@ -20,6 +20,19 @@ from .mivolo import MiVOLOAgeGender
 from .headpose import HeadPoseEstimator
 
 
+class _RknnBox:
+    """Ultralytics box adapter: box.cls[0] / box.conf[0] / box.xyxy[0]."""
+    def __init__(self, cls_id: int, conf: float, xyxy):
+        self.cls = np.array([cls_id], dtype=np.float32)
+        self.conf = np.array([conf], dtype=np.float32)
+        self.xyxy = np.array([xyxy], dtype=np.float32)
+
+
+class _RknnResult:
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+
 class HumanDetector:
     """YOLO Human + YuNet Face + MiVOLO age/gender + WHENet looking."""
 
@@ -33,9 +46,58 @@ class HumanDetector:
         self.imgsz = imgsz
         self.model_name = model_name
         self.face_min_size = int(face_min_size)
-        # lazy download on first run; Docker build e cache kora jabe
-        self.model = YOLO(model_name)
-        self.names = self.model.names  # {0: 'person', ...}
+        # ---- NPU backend: YOLO_BACKEND=auto|cpu|rknn ----
+        # auto = RKNN_MODEL file + rknnlite thakle NPU, naile CPU fallback.
+        # .rknn akhono na banale safe CPU te cholbe, crash korbe na.
+        self.backend = os.getenv("YOLO_BACKEND", "auto").lower()
+        self.rknn_path = os.getenv("RKNN_MODEL", "/app/models/yolo11n-rk3576.rknn")
+        self.rknn = None
+        if self.backend in ("auto", "rknn") and os.path.exists(self.rknn_path):
+            try:
+                from rknnlite.api import RKNNLite
+                core = os.getenv("RKNPU_CORE", "AUTO")
+                self.rknn = RKNNLite()
+                # NPU core: AUTO default; RK3576 te 0/1/2 force kora jay
+                load_kw = {}
+                if core.upper() not in ("AUTO", ""):
+                    try:
+                        load_kw["core_mask"] = int(core)
+                    except ValueError:
+                        pass
+                ret = self.rknn.load_rknn(self.rknn_path)
+                if ret != 0:
+                    raise RuntimeError(f"load_rknn ret={ret}")
+                ret = self.rknn.init_runtime(**load_kw) if load_kw else self.rknn.init_runtime()
+                if ret != 0:
+                    raise RuntimeError(f"init_runtime ret={ret}")
+                print(f"[yolo] NPU backend active: {self.rknn_path} core={core}")
+            except Exception as e:
+                print(f"[yolo] NPU init fail, CPU fallback: {e}")
+                self.rknn = None
+        if self.rknn is not None:
+            self.backend = "rknn"
+            self.model = None
+            self.names = {i: n for i, n in enumerate(
+                ["person", "bicycle", "car", "motorcycle", "airplane", "bus",
+                 "train", "truck", "boat", "traffic light", "fire hydrant",
+                 "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+                 "horse", "sheep", "cow", "elephant", "bear", "zebra",
+                 "giraffe", "backpack", "umbrella", "handbag", "tie",
+                 "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+                 "kite", "baseball bat", "baseball glove", "skateboard",
+                 "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+                 "fork", "knife", "spoon", "bowl", "banana", "apple",
+                 "sandwich", "orange", "broccoli", "carrot", "hot dog",
+                 "pizza", "donut", "cake", "chair", "couch", "potted plant",
+                 "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+                 "remote", "keyboard", "cell phone", "microwave", "oven",
+                 "toaster", "sink", "refrigerator", "book", "clock", "vase",
+                 "scissors", "teddy bear", "hair drier", "toothbrush"])}
+        else:
+            self.backend = "cpu"
+            # lazy download on first run; Docker build e cache kora jabe
+            self.model = YOLO(model_name)
+            self.names = self.model.names  # {0: 'person', ...}
         self._lock = threading.Lock()
         self.last_counts = {"human": 0, "non_human": 0, "face": 0,
                             "male": 0, "female": 0, "fps": 0.0}
@@ -59,6 +121,8 @@ class HumanDetector:
         self._last_dets: List[Dict] = []
 
     def _run_yolo(self, frame: np.ndarray):
+        if self.rknn is not None:
+            return self._run_rknn(frame)
         with self._lock:
             results = self.model.predict(
                 source=frame, conf=self.conf, imgsz=self.imgsz,
@@ -66,6 +130,76 @@ class HumanDetector:
                 agnostic_nms=True, max_det=20,
             )[0]
         return results
+
+    # ---------- RK3576 NPU (RKNNLite) path ----------
+    @staticmethod
+    def _letterbox(img: np.ndarray, size: int):
+        """Ultralytics-style letterbox -> square size x size + undo params."""
+        h, w = img.shape[:2]
+        r = min(size / h, size / w)
+        nh, nw = int(round(h * r)), int(round(w * r))
+        resized = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        top = (size - nh) // 2
+        left = (size - nw) // 2
+        out = np.full((size, size, 3), 114, dtype=np.uint8)
+        out[top:top + nh, left:left + nw] = resized
+        return out, r, left, top
+
+    def _run_rknn(self, frame: np.ndarray):
+        """NPU infer + Python NMS. Output shape auto-handle (84xN / Nx84)."""
+        import numpy as _np
+        H, W = frame.shape[:2]
+        img, ratio, pad_x, pad_y = self._letterbox(frame, self.imgsz)
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(_np.float32) / 255.0
+        nchw = _np.transpose(rgb, (2, 0, 1))[_np.newaxis, ...]
+        with self._lock:
+            outs = self.rknn.inference(inputs=[nchw])
+        pred = None
+        for o in outs:
+            o = _np.asarray(o)
+            if o.ndim == 3 and (o.shape[1] == 84 or o.shape[2] == 84):
+                pred = o
+                break
+        if pred is None:
+            if not getattr(self, "_rknn_warned", False):
+                print(f"[yolo] NPU unexpected outputs: "
+                      f"{[tuple(_np.asarray(o).shape) for o in outs]} "
+                      f"-> empty (shape janiye pathao, fix kore debo)")
+                self._rknn_warned = True
+            return _RknnResult([])
+        if pred.shape[1] == 84:
+            pred = _np.transpose(pred[0], (1, 0))  # (N,84)
+        else:
+            pred = pred[0]  # (N,84)
+        boxes_cxcywh = pred[:, :4]
+        scores = pred[:, 4:]
+        cls_ids = _np.argmax(scores, axis=1)
+        confs = scores[_np.arange(len(scores)), cls_ids]
+        keep = confs >= self.conf
+        # sudhu person (0) + non-human box — sob class NMS er age filter na,
+        # conf filter e enough; agnostic NMS er moto 1 bar NMS
+        boxes_cxcywh, cls_ids, confs = boxes_cxcywh[keep], cls_ids[keep], confs[keep]
+        if len(confs) == 0:
+            return _RknnResult([])
+        # letterbox undo -> original frame coords
+        cx, cy, bw, bh = boxes_cxcywh.T
+        x1 = ((cx - bw / 2 - pad_x) / ratio).clip(0, W)
+        y1 = ((cy - bh / 2 - pad_y) / ratio).clip(0, H)
+        x2 = ((cx + bw / 2 - pad_x) / ratio).clip(0, W)
+        y2 = ((cy + bh / 2 - pad_y) / ratio).clip(0, H)
+        ltrb = _np.stack([x1, y1, x2, y2], axis=1).tolist()
+        try:
+            idxs = cv2.dnn.NMSBoxes(ltrb, confs.tolist(),
+                                    self.conf, 0.45, top_k=20)
+            idxs = set(int(i) for arr in _np.asarray(idxs).reshape(-1)
+                       for i in ([arr] if _np.ndim(arr) == 0 else arr))
+        except Exception:
+            idxs = set(range(len(confs)))
+        out = [_RknnBox(int(cls_ids[i]), float(confs[i]),
+                        [int(ltrb[i][0]), int(ltrb[i][1]),
+                         int(ltrb[i][2]), int(ltrb[i][3])])
+               for i in sorted(idxs)[:20]]
+        return _RknnResult(out)
 
     def infer(self, frame: np.ndarray) -> tuple[np.ndarray, List[Dict]]:
         """Run detection, draw boxes, return (annotated_frame, detections)."""

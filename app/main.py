@@ -156,6 +156,9 @@ def index():
 def health():
     return {"status": "ok", "camera_connected": camera.connected,
             "model": MODEL_NAME, "conf": CONF, "imgsz": IMGSZ,
+            "backend": getattr(detector, "backend", "cpu"),
+            "rknn_model": getattr(detector, "rknn_path", None),
+            "npu_active": getattr(detector, "rknn", None) is not None,
             "face_enabled": FACE_ENABLE,
             "face_loaded": detector.face_enabled,
             "face_min_size": FACE_MIN_SIZE,

@@ -8,3 +8,7 @@ accelerate==1.8.1
 timm==0.9.16
 lapx>=0.5.2
 onnxruntime>=1.17
+# NPU (RK3576 board, ARM64 only): Dockerfile e auto-install hoy.
+# PC (x86) te install koro NA — build fail korbe.
+# board e manually lagle: pip install rknn-toolkit-lite2
+# rknn-toolkit-lite2  # <-- ARM64 board only, comment out of purpose
