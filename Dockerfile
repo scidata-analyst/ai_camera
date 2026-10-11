@@ -1,10 +1,14 @@
 # RK3576 (arm64) + x86_64 dual-arch compatible
 FROM python:3.11-slim
 
+# NPU: YOLO_BACKEND=auto|cpu|rknn. auto = .rknn file thakle NPU, naile CPU
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     MODEL_NAME=yolo11n.pt \
+    YOLO_BACKEND=auto \
+    RKNN_MODEL=/app/models/yolo11n-rk3576.rknn \
+    RKNPU_CORE=AUTO \
     CONF_THRESHOLD=0.5 \
     IMG_SIZE=320 \
     JPEG_QUALITY=60 \
@@ -32,8 +36,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/root/.cache/huggingface
 
 # opencv + torch dependency (+git for MiVOLO lib)
+# libdrm2 = RK3576 /dev/dri access er jonno (NPU/DRI node khulte lage)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libdrm2 \
     v4l-utils curl git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,6 +46,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<81" wheel && pip install -r requirements.txt && \
     pip install --no-deps --no-build-isolation git+https://github.com/WildChlamydia/MiVOLO.git
+# NPU runtime: sudhu ARM64 (RK3576 board) e install hobe.
+# x86 PC te build fail korbe na — uname check kore skip kore.
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      pip install rknn-toolkit-lite2; \
+    else \
+      echo "[docker] x86 build: rknn-toolkit-lite2 skipped (board e auto install hobe)"; \
+    fi
 
 COPY app/ ./app/
 
