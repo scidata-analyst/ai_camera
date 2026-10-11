@@ -1,7 +1,12 @@
 services:
   ai-camera:
-    build: .
+    build:
+      context: .
+      # board er DNS issue thakle build er somoy host network use korbe
+      network: host
     image: ai-camera:rk3576
+    # image age theke built thakle pull skip korbe (docker login lagbe na)
+    pull_policy: never
     container_name: ai-camera
     ports:
       - "8080:8080"
