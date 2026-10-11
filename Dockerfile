@@ -1,7 +1,5 @@
-# RK3576 (arm64) + x86_64 dual-arch compatible
 FROM python:3.11-slim
 
-# NPU: YOLO_BACKEND=auto|cpu|rknn. auto = .rknn file thakle NPU, naile CPU
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -35,37 +33,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LOOK_PITCH=20 \
     HF_HOME=/root/.cache/huggingface
 
-# opencv + torch dependency (+git for MiVOLO lib)
-# libdrm2 = RK3576 /dev/dri access er jonno (NPU/DRI node khulte lage)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libdrm2 \
-    v4l-utils curl git \
+    libgl1 libglib2.0-0 libdrm2 \
+    curl git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --upgrade pip "setuptools<81" wheel && pip install -r requirements.txt && \
-    pip install --no-deps --no-build-isolation git+https://github.com/WildChlamydia/MiVOLO.git
-# NPU runtime: sudhu ARM64 (RK3576 board) e install hobe.
-# x86 PC te build fail korbe na — uname check kore skip kore.
+RUN pip install --upgrade pip "setuptools<81" wheel && \
+    pip install --retries 5 --timeout 120 -r requirements.txt && \
+    pip install --no-deps --no-build-isolation git+https://github.com/WildChlamydia/MiVOLO.git && \
+    apt-get purge -y git && apt-get autoremove -y && rm -rf /root/.cache/pip
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
       pip install rknn-toolkit-lite2; \
     else \
-      echo "[docker] x86 build: rknn-toolkit-lite2 skipped (board e auto install hobe)"; \
+      echo "[docker] x86 build: rknn-toolkit-lite2 skipped"; \
     fi
 
 COPY app/ ./app/
 
-# model pre-download (build cache, runtime eo download hobe jodi na thake)
-RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
+RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')" \
+    || echo "[warn] YOLO pre-download skip"
 RUN mkdir -p /app/models && \
-    curl -L -o /app/models/yunet.onnx \
-    https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx && \
-    curl -L -o /app/models/whenet.onnx \
-    https://github.com/PINTO0309/HeadPoseEstimation-WHENet-yolov4-onnx-openvino/releases/download/v1.0.4/whenet_1x3x224x224_prepost.onnx && \
-    ls -lh /app/models/
-# MiVOLO weights (~115MB) pre-download -> HF cache
-RUN python -c "import app.mivolo; from transformers import AutoModelForImageClassification; AutoModelForImageClassification.from_pretrained('iitolstykh/mivolo_v2', trust_remote_code=True)"
+    (curl -L --retry 3 -o /app/models/yunet.onnx \
+    https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx \
+    || echo "[warn] yunet skip") && \
+    (curl -L --retry 3 -o /app/models/whenet.onnx \
+    https://github.com/PINTO0309/HeadPoseEstimation-WHENet-yolov4-onnx-openvino/releases/download/v1.0.4/whenet_1x3x224x224_prepost.onnx \
+    || echo "[warn] whenet skip") && \
+    ls -lh /app/models/ || true
+RUN python -c "import app.mivolo; from transformers import AutoModelForImageClassification; AutoModelForImageClassification.from_pretrained('iitolstykh/mivolo_v2', trust_remote_code=True)" \
+    || echo "[warn] MiVOLO pre-download skip"
 
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
