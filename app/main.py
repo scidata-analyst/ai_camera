@@ -77,27 +77,32 @@ threading.Thread(target=_infer_loop, daemon=True).start()
 
 HTML_PAGE = """
 <!doctype html>
-<html><head><meta charset="utf-8"><title>AI Camera - Human + Face</title>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Camera - Human + Face</title>
 <style>
-body{background:#111;color:#eee;font-family:sans-serif;text-align:center;margin:0}
-header{padding:12px;background:#000;font-size:20px}
-img{max-width:96vw;border:3px solid #333;border-radius:8px;margin-top:10px}
-.info{color:#aaa;margin:10px}
-.panel{background:#1e1e1e;display:inline-block;padding:10px 18px;border-radius:8px;margin-top:8px}
+html,body{height:100%}
+body{background:#000;color:#eee;font-family:sans-serif;text-align:center;margin:0;
+     display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{padding:8px;background:#000;font-size:18px;flex:0 0 auto}
+img#vid{flex:1 1 auto;min-height:0;width:100vw;object-fit:contain;background:#000}
+.bar{flex:0 0 auto;padding:4px;font-size:13px}
+.panel{background:#1e1e1e;display:inline-block;padding:6px 14px;border-radius:8px}
 .panel b{color:#4fc3f7}
+.info{color:#aaa}
 a{color:#4fc3f7}
+button{margin:0 4px}
 </style></head>
 <body>
 <header>AI Camera - Human / Face / Gender (YOLOv11n + YuNet + MiVOLO)</header>
-<img src="/video_feed" />
-<div><div class="panel" id="s">loading stats... (1s update)</div></div>
-<div style="margin:8px">
+<img id="vid" src="/video_feed" />
+<div class="bar"><span class="panel" id="s">loading stats... (1s update)</span></div>
+<div class="bar">
 <button onclick="setFlip('h')">Flip H: <span id="fh">-</span></button>
 <button onclick="setFlip('v')">Flip V: <span id="fv">-</span></button>
 <button onclick="resetFlip()">Reset</button>
+<span class="info">Green Human | Cyan Face | <b>Green [LOOK] = Looking</b> |
+<a href="/api/stats">stats</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></span>
 </div>
-<div class="info">Green Human | Cyan Face | <b>Green [LOOK] = Looking</b> |
-<a href="/api/stats">stats</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></div>
 <script>
 async function tick(){
   try{
