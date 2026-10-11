@@ -26,6 +26,21 @@ class CameraStream:
     def _connect(self):
         self.cap = cv2.VideoCapture(self.source)
         if self.cap.isOpened():
+            # LAG FIX: buffer=1 + MJPG -> purono frame jome lag hoy na,
+            # sobsomoy latest frame ase. MJPG decode o fast.
+            try:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+            try:
+                self.cap.set(cv2.CAP_PROP_FOURCC,
+                             cv2.VideoWriter_fourcc(*"MJPG"))
+            except Exception:
+                pass
+            try:
+                self.cap.set(cv2.CAP_PROP_FPS, 30)
+            except Exception:
+                pass
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self.connected = True
@@ -56,6 +71,9 @@ class CameraStream:
                 if ok and f is not None:
                     with self.lock:
                         self.frame = f
+                    # LAG FIX: camera thread CPU na khak — choto sleep,
+                    # infer/stream thread ke GIL charo
+                    time.sleep(0.005)
                 else:
                     # camera drop -> reconnect once
                     self.connected = False
