@@ -41,7 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<81" wheel && \
+    if [ "$(uname -m)" = "aarch64" ]; then \
+      pip install --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu torch torchvision; \
+    fi && \
     pip install --retries 5 --timeout 120 -r requirements.txt && \
+    (pip uninstall -y opencv-python || true) && \
+    pip install --retries 5 --timeout 120 --no-deps --force-reinstall "opencv-python-headless>=4.9,<5.0" && \
     pip install --no-deps --no-build-isolation git+https://github.com/WildChlamydia/MiVOLO.git && \
     apt-get purge -y git && apt-get autoremove -y && rm -rf /root/.cache/pip
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
