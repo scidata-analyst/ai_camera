@@ -11,8 +11,8 @@ services:
     devices:
       - "/dev/video0:/dev/video0"
       - "/dev/dri:/dev/dri"
+      - "/dev/rknpu:/dev/rknpu"
     volumes:
-      - ./models:/root/.cache
       - ./models:/app/models
     environment:
       - CAMERA_SOURCE=0
