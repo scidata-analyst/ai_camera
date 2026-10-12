@@ -52,6 +52,13 @@ class HumanDetector:
         self.backend = os.getenv("YOLO_BACKEND", "auto").lower()
         self.rknn_path = os.getenv("RKNN_MODEL", "/app/models/yolo11n-rk3576.rknn")
         self.rknn = None
+        # NPU device log: /dev/rknpu (NPU) + /dev/dri/renderD129 (Mali GPU)
+        try:
+            from .accel import hw_summary
+            print(f"[hw] {hw_summary()} rknn_model={self.rknn_path} "
+                  f"exists={os.path.exists(self.rknn_path)}")
+        except Exception:
+            pass
         if self.backend in ("auto", "rknn") and os.path.exists(self.rknn_path):
             try:
                 from rknnlite.api import RKNNLite
@@ -117,6 +124,11 @@ class HumanDetector:
         # RK3576 CPU te ~2x infer fps bare.
         self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
         self.max_faces = max(1, int(os.getenv("MAX_FACES", "3")))
+        # SPEED: YuNet proti infer e na chaliye N bar por por (box reuse).
+        # FACE_EVERY=2 mane YOLO skip er sathe face o half rate -> CPU ~30% save.
+        self.face_every = max(1, int(os.getenv("FACE_EVERY", "2")))
+        self._face_no = 0
+        self._last_faces_cache = []
         self._frame_no = 0
         self._last_dets: List[Dict] = []
 
@@ -254,25 +266,32 @@ class HumanDetector:
 
         # YuNet face -> WHENet looking -> MiVOLO age/gender (body = YOLO box).
         # looking age ber hoy, jate blurry/side frame e age refresh off thake.
+        # SPEED: FACE_EVERY onujayi YuNet skip, majhe ager face reuse (0ms).
         faces = []
         if self.face is not None:
             try:
-                faces = self.face.detect(frame)
-                # LAG FIX: sob face na — sobcheye boro MAX_FACES ta.
-                # choto/durer face e WHENet+MiVOLO chalano CPU noshto.
-                if len(faces) > self.max_faces:
-                    faces = sorted(
-                        faces,
-                        key=lambda f: -((f["box"][2] - f["box"][0]) *
-                                        (f["box"][3] - f["box"][1])),
-                    )[:self.max_faces]
-                if self.headpose is not None and faces:
-                    faces = self.headpose.predict_frame(frame, faces)
-                # Gender+Age: sudhu boro/clear/frontal face e refresh
-                if self.mivolo is not None and faces:
-                    bodies = [d["box"] for d in detections if d["kind"] == "human"]
-                    faces = self.mivolo.predict_frame(
-                        frame, faces, bodies, min_side=self.face_min_size)
+                self._face_no += 1
+                run_face = (self._face_no % self.face_every == 1) or not self._last_faces_cache
+                if run_face:
+                    faces = self.face.detect(frame)
+                    # LAG FIX: sob face na — sobcheye boro MAX_FACES ta.
+                    # choto/durer face e WHENet+MiVOLO chalano CPU noshto.
+                    if len(faces) > self.max_faces:
+                        faces = sorted(
+                            faces,
+                            key=lambda f: -((f["box"][2] - f["box"][0]) *
+                                            (f["box"][3] - f["box"][1])),
+                        )[:self.max_faces]
+                    if self.headpose is not None and faces:
+                        faces = self.headpose.predict_frame(frame, faces)
+                    # Gender+Age: sudhu boro/clear/frontal face e refresh
+                    if self.mivolo is not None and faces:
+                        bodies = [d["box"] for d in detections if d["kind"] == "human"]
+                        faces = self.mivolo.predict_frame(
+                            frame, faces, bodies, min_side=self.face_min_size)
+                    self._last_faces_cache = [dict(f) for f in faces]
+                else:
+                    faces = [dict(f) for f in self._last_faces_cache]
                 YuNetFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")

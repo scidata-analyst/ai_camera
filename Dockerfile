@@ -14,6 +14,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STREAM_FPS=25 \
     DETECT_EVERY=2 \
     MAX_FACES=3 \
+    FACE_EVERY=2 \
+    FACE_BACKEND=auto \
+    HEADPOSE_PROVIDER=auto \
+    OPENCV_OPENCL=auto \
     TORCH_THREADS=4 \
     ORT_THREADS=2 \
     OMP_NUM_THREADS=4 \
@@ -37,6 +41,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 libgomp1 ca-certificates \
+    ocl-icd-libopencl1 mesa-opencl-icd \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

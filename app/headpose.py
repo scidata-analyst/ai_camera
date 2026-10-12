@@ -37,6 +37,7 @@ class HeadPoseEstimator:
         self.pitch_thr = float(os.getenv("LOOK_PITCH", "20"))
         self.session = None
         self.input_name = None
+        self.providers = ["CPUExecutionProvider"]
         if not self.enabled:
             return
         try:
@@ -51,8 +52,19 @@ class HeadPoseEstimator:
             so.inter_op_num_threads = 1
             so.graph_optimization_level = (
                 _ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
+            # NPU/GPU: /dev/dri/renderD129 thakle GPU provider try, naile CPU.
+            # HEADPOSE_PROVIDER=auto (default) | CPUExecutionProvider | OpenVINO...
+            try:
+                from .accel import pick_ort_providers
+                providers = pick_ort_providers(
+                    _os.getenv("HEADPOSE_PROVIDER", "auto"))
+            except Exception:
+                providers = ["CPUExecutionProvider"]
             self.session = ort.InferenceSession(
-                path, sess_options=so, providers=["CPUExecutionProvider"])
+                path, sess_options=so, providers=providers)
+            self.providers = self.session.get_providers()
+            self.input_name = self.session.get_inputs()[0].name
+            print(f"[headpose] loaded {path} (threads={nth} prov={self.providers})")
             self.input_name = self.session.get_inputs()[0].name
             print(f"[headpose] loaded {path} (threads={nth})")
         except Exception as e:

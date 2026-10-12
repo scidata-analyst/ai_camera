@@ -44,6 +44,10 @@ http://localhost:8080/api/health
 | MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
 | MIVOLO_REFRESH | 1.0 | proti sec e re-check -> sec proti median (barale CPU kombbe) |
 | MIVOLO_BLUR | 80 | er niche sharpness hole age refresh off (motion blur fix) |
+| FACE_EVERY | 2 | YuNet proti N infer e 1 bar, majhe box reuse (CPU ~30% save) |
+| FACE_BACKEND | auto | `auto/cpu/opencl` — renderD129 thakle OpenCL try |
+| HEADPOSE_PROVIDER | auto | ORT provider list, auto = GPU try + CPU fallback |
+| OPENCV_OPENCL | auto | `auto/off` — /dev/dri thakle OpenCL on |
 | HEADPOSE_ENABLE | 1 | 0 korle looking off |
 | HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
 | LOOK_YAW / LOOK_PITCH | 25 / 20 | looking threshold degree |
@@ -80,6 +84,18 @@ http://localhost:8080/api/health
 - Proti 1 sec por por `mean / median / mode` publish hoy, UI + `/api/stats` e dekha jay.
 - Choto face (<FACE_MIN_SIZE) e gender `Unknown` dekhay, count eo dhore na — vul M/F komate.
 - Web UI panel o 1 sec por por auto-refresh hoy (stable M/W soho).
+
+## NPU / GPU (RK3576, renderD129)
+- `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache — board er
+  `/dev/dri/renderD129` (Mali GPU) auto container e ase.
+  Explicit path lagle `- "/dev/dri/renderD129:/dev/dri/renderD129"` uncomment koro.
+- NPU (RKNN YOLO): board e `/dev/rknpu` thakle oi line uncomment koro +
+  `yolo11n.pt → .rknn` model `/app/models/yolo11n-rk3576.rknn` e rakho.
+  File/device na thakle safe CPU fallback, crash korbe na.
+- YuNet (`FACE_BACKEND=auto`): renderD129 + OpenCL thakle OpenCL target,
+  naile CPU. WHENet (`HEADPOSE_PROVIDER=auto`): GPU provider try + CPU fallback.
+- `/api/health` e `hw` (dri/rknpu list), `opencl`, `face_backend`,
+  `headpose_providers`, `npu_active` dekha jay.
 
 ## RK3576 note
 - Base image `python:3.11-slim` → arm64/amd64 duitai chole, tai same Dockerfile board + PC te cholbe.

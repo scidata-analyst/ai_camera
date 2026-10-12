@@ -36,6 +36,15 @@ try:
     cv2.setNumThreads(max(1, min(4, int(os.getenv("TORCH_THREADS", "4")))))
 except Exception:
     pass
+# NPU/GPU: /dev/dri/renderD129 (Mali) thakle OpenCL on — YuNet fast hoy
+try:
+    from .accel import hw_summary, try_enable_opencl
+    _HW = hw_summary()
+    _OCL = try_enable_opencl()
+    print(f"[hw] {_HW} opencl={_OCL}")
+except Exception as e:
+    _HW, _OCL = {}, False
+    print(f"[hw] accel check skip: {e}")
 
 app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)")
 
@@ -159,6 +168,11 @@ def health():
             "backend": getattr(detector, "backend", "cpu"),
             "rknn_model": getattr(detector, "rknn_path", None),
             "npu_active": getattr(detector, "rknn", None) is not None,
+            "hw": _HW, "opencl": _OCL,
+            "face_backend": getattr(getattr(detector, "face", None),
+                                    "backend_used", "off"),
+            "headpose_providers": getattr(getattr(detector, "headpose", None),
+                                          "providers", []),
             "face_enabled": FACE_ENABLE,
             "face_loaded": detector.face_enabled,
             "face_min_size": FACE_MIN_SIZE,
