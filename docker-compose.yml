@@ -2,6 +2,7 @@ services:
   ai-camera:
     build:
       context: .
+      network: host
     image: ai-camera:rk3576
     pull_policy: never
     container_name: ai-camera
