@@ -6,8 +6,7 @@ services:
     image: ai-camera:rk3576
     pull_policy: never
     container_name: ai-camera
-    ports:
-      - "8080:8080"
+    network_mode: host
     devices:
       - "/dev/video0:/dev/video0"
       - "/dev/dri:/dev/dri"
