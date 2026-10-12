@@ -11,7 +11,6 @@ services:
     devices:
       - "/dev/video0:/dev/video0"
       - "/dev/dri:/dev/dri"
-      - "/dev/rknpu:/dev/rknpu"
     volumes:
       - ./models:/app/models
     environment:
