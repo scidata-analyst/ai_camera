@@ -1,14 +1,25 @@
-fastapi>=0.109,<0.117
-uvicorn>=0.27,<0.31
-opencv-python-headless>=4.9,<5.0
-numpy>=1.26,<2.0
-ultralytics>=8.2,<8.4
+fastapi==0.116.2
+uvicorn==0.30.6
+opencv-python-headless==4.11.0.86
+numpy==1.26.4
+matplotlib==3.11.2
+pillow==12.3.0
+polars==2.0.0
+psutil==7.2.2
+pyyaml==6.0.3
+requests==2.34.2
+scipy==1.17.1
+ultralytics-thop==2.2.2
+filelock==4.1.0
+typing-extensions==4.16.0
+sympy==1.14.0
+networkx==3.6.1
+jinja2==3.1.6
+fsspec==2026.9.0
+mpmath==1.3.0
+markupsafe==3.0.4
 transformers==4.51.0
 accelerate==1.8.1
 timm==0.9.16
-lapx>=0.5.2
-onnxruntime>=1.17
-# NPU (RK3576 board, ARM64 only): Dockerfile e auto-install hoy.
-# PC (x86) te install koro NA — build fail korbe.
-# board e manually lagle: pip install rknn-toolkit-lite2
-# rknn-toolkit-lite2  # <-- ARM64 board only, comment out of purpose
+lapx==0.10.0
+onnxruntime==1.31.0
