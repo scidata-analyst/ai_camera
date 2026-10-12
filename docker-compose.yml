@@ -9,7 +9,15 @@ services:
     network_mode: host
     devices:
       - "/dev/video11:/dev/video0"
+      # /dev/dri mount korle board er renderD129 (Mali GPU) container e ase.
+      # Explicit path chaile niche line uncomment koro (host e file thakte hobe):
+      # - "/dev/dri/renderD129:/dev/dri/renderD129"
       - "/dev/dri:/dev/dri"
+      # NPU (RKNN) — board e /dev/rknpu thakle uncomment koro:
+      # - "/dev/rknpu:/dev/rknpu"
+    group_add:
+      - video
+      - render
     volumes:
       - ./models:/app/models
     environment:
@@ -27,6 +35,10 @@ services:
       - SMOOTH_WINDOW=1.0
       - DETECT_EVERY=2
       - MAX_FACES=3
+      - FACE_EVERY=2
+      - FACE_BACKEND=auto
+      - HEADPOSE_PROVIDER=auto
+      - OPENCV_OPENCL=auto
       - TORCH_THREADS=4
       - ORT_THREADS=2
       - FACE_ENABLE=1

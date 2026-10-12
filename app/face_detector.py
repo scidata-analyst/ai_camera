@@ -33,21 +33,46 @@ class YuNetFace:
         self.score_thr = float(os.getenv("FACE_SCORE", str(score)))
         self.enabled = os.getenv("FACE_ENABLE", "1") == "1"
         self.detector = None
+        # FACE_BACKEND=auto|cpu|opencl — auto = /dev/dri/renderD129 thakle OpenCL
+        self.backend_want = os.getenv("FACE_BACKEND", "auto").lower()
+        self.backend_used = "cpu"
         if not self.enabled:
             return
         try:
             path = ensure_model(model_path)
+            backend, target = self._pick_backend()
             self.detector = cv2.FaceDetectorYN_create(
                 path, "", input_size,
                 self.score_thr, 0.3, 5000,
-                cv2.dnn.DNN_BACKEND_OPENCV,
-                cv2.dnn.DNN_TARGET_CPU,
+                backend, target,
             )
             self.model_path = path
+            self.backend_used = "opencl" if target == cv2.dnn.DNN_TARGET_OPENCL else "cpu"
+            print(f"[face] YuNet backend={self.backend_used} ({path})")
             self._last_hw = None  # LAG FIX: setInputSize cache
         except Exception as e:
             print(f"[face] YuNet disabled: {e}")
             self.detector = None
+
+    @staticmethod
+    def _pick_backend():
+        """auto: renderD129/Mali thakle OpenCL try, fail hole CPU."""
+        want = os.getenv("FACE_BACKEND", "auto").lower()
+        if want == "cpu":
+            return cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU
+        if want == "opencl":
+            return cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_OPENCL
+        # auto
+        try:
+            from .accel import dri_devices
+            import cv2 as _cv
+            if dri_devices() and _cv.ocl.haveOpenCL():
+                _cv.ocl.setUseOpenCL(True)
+                if _cv.ocl.useOpenCL():
+                    return _cv.dnn.DNN_BACKEND_OPENCV, _cv.dnn.DNN_TARGET_OPENCL
+        except Exception:
+            pass
+        return cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU
 
     def detect(self, frame: np.ndarray):
         """Return list of {box, conf, landmarks}. Empty jodi disabled."""
