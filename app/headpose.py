@@ -37,6 +37,14 @@ class HeadPoseEstimator:
         self.pitch_thr = float(os.getenv("LOOK_PITCH", "20"))
         self.session = None
         self.input_name = None
+        self.providers = ["CPUExecutionProvider"]
+        # bg worker cache: infer loop instant fill, worker refresh kore.
+        # HEADPOSE_TTL sec porjonto ager yaw/pitch reuse (0ms, block na).
+        import threading as _th
+        self._clock = _th.RLock()
+        self._cache = []  # {box, yaw, pitch, roll, looking, t}
+        self._ttl = float(os.getenv("HEADPOSE_TTL", "1.0"))
+        self._iou_thr = 0.4
         if not self.enabled:
             return
         try:
@@ -51,10 +59,19 @@ class HeadPoseEstimator:
             so.inter_op_num_threads = 1
             so.graph_optimization_level = (
                 _ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
+            # NPU/GPU: /dev/dri/renderD129 thakle GPU provider try, naile CPU.
+            # HEADPOSE_PROVIDER=auto (default) | CPUExecutionProvider | OpenVINO...
+            try:
+                from .accel import pick_ort_providers
+                providers = pick_ort_providers(
+                    _os.getenv("HEADPOSE_PROVIDER", "auto"))
+            except Exception:
+                providers = ["CPUExecutionProvider"]
             self.session = ort.InferenceSession(
-                path, sess_options=so, providers=["CPUExecutionProvider"])
+                path, sess_options=so, providers=providers)
+            self.providers = self.session.get_providers()
             self.input_name = self.session.get_inputs()[0].name
-            print(f"[headpose] loaded {path} (threads={nth})")
+            print(f"[headpose] loaded {path} (threads={nth} prov={self.providers})")
         except Exception as e:
             print(f"[headpose] disabled: {e}")
             self.session = None
@@ -75,6 +92,60 @@ class HeadPoseEstimator:
         out = self.session.run(None, {self.input_name: blob})[0][0]
         yaw, roll, pitch = float(out[0]), float(out[1]), float(out[2])
         return yaw, pitch, roll
+
+    @staticmethod
+    def _iou(a, b) -> float:
+        x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+        x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        if inter <= 0:
+            return 0.0
+        area = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1])
+        return inter / max(area - inter, 1e-6)
+
+    def remember(self, faces):
+        """Worker er fresh result cache e rakho (bounded, thread-safe)."""
+        import time
+        now = time.time()
+        with self._clock:
+            for fc in faces:
+                if "looking" not in fc:
+                    continue
+                entry = {"box": list(fc["box"]), "yaw": fc.get("yaw", 0.0),
+                         "pitch": fc.get("pitch", 0.0),
+                         "roll": fc.get("roll", 0.0),
+                         "looking": bool(fc.get("looking")), "t": now}
+                replaced = False
+                for c in self._cache:
+                    if self._iou(fc["box"], c["box"]) >= self._iou_thr:
+                        c.update(entry)
+                        replaced = True
+                        break
+                if not replaced:
+                    self._cache.append(entry)
+            self._cache = self._cache[-20:]
+        return faces
+
+    def fill_from_cache(self, faces):
+        """Infer loop theke instant fill (<1ms, block na)."""
+        if self.session is None:
+            return faces
+        import time
+        now = time.time()
+        with self._clock:
+            for fc in faces:
+                best, best_iou = None, 0.0
+                for c in self._cache:
+                    iou = self._iou(fc["box"], c["box"])
+                    if iou > best_iou:
+                        best, best_iou = c, iou
+                if best is not None and best_iou >= self._iou_thr \
+                        and now - best["t"] <= self._ttl:
+                    best["box"] = list(fc["box"])
+                    fc.update({"yaw": best["yaw"], "pitch": best["pitch"],
+                               "roll": best["roll"],
+                               "looking": best["looking"]})
+        return faces
 
     def predict_frame(self, frame: np.ndarray, faces, min_side: int = 40):
         """faces e yaw/pitch/roll/looking bosiye dey (in-place)."""

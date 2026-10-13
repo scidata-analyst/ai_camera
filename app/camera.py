@@ -24,6 +24,12 @@ class CameraStream:
         self._connect()
 
     def _connect(self):
+        # purono cap release na kore re-connect korle fd leak hoto
+        try:
+            if self.cap is not None:
+                self.cap.release()
+        except Exception:
+            pass
         self.cap = cv2.VideoCapture(self.source)
         if self.cap.isOpened():
             # LAG FIX: buffer=1 + MJPG -> purono frame jome lag hoy na,
