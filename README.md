@@ -44,6 +44,10 @@ http://localhost:8080/api/health
 | MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
 | MIVOLO_REFRESH | 1.0 | proti sec e re-check -> sec proti median (barale CPU kombbe) |
 | MIVOLO_BLUR | 80 | er niche sharpness hole age refresh off (motion blur fix) |
+| FACE_EVERY | 2 | YuNet proti N infer e 1 bar, majhe box reuse (CPU ~30% save) |
+| FACE_BACKEND | auto | `auto/cpu/opencl` — race e fast ta ney, kokhono slow hoy na |
+| HEADPOSE_PROVIDER | auto | ORT provider list, auto = GPU try + CPU fallback |
+| OPENCV_OPENCL | auto | `auto/off` — race jit-lei OpenCL on |
 | HEADPOSE_ENABLE | 1 | 0 korle looking off |
 | HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
 | LOOK_YAW / LOOK_PITCH | 25 / 20 | looking threshold degree |
@@ -80,6 +84,40 @@ http://localhost:8080/api/health
 - Proti 1 sec por por `mean / median / mode` publish hoy, UI + `/api/stats` e dekha jay.
 - Choto face (<FACE_MIN_SIZE) e gender `Unknown` dekhay, count eo dhore na — vul M/F komate.
 - Web UI panel o 1 sec por por auto-refresh hoy (stable M/W soho).
+
+## NPU / GPU (RK3576, renderD129)
+- `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache — board er
+  `/dev/dri/renderD129` (Mali GPU) auto container e ase.
+  Explicit path lagle `- "/dev/dri/renderD129:/dev/dri/renderD129"` uncomment koro.
+- NPU (RKNN YOLO): board e `/dev/rknpu` thakle oi line uncomment koro +
+  `yolo11n.pt → .rknn` model `/app/models/yolo11n-rk3576.rknn` e rakho.
+  File/device na thakle safe CPU fallback, crash korbe na.
+  Export (PC te 1 bar):
+  ```bash
+  pip install rknn-toolkit2 ultralytics onnx
+  python tools/export_rknn.py --imgsz 320
+  # int8 (fast, calib image list lagbe):
+  # python tools/export_rknn.py --quant i8 --dataset calib.txt --imgsz 320
+  ```
+  Note: `.rknn` output raw logits dey — sigmoid app code e hoy
+  (measure kora: ONNX output max ~316 = raw). onnx input naam `images`,
+  `[1,3,H,W]` — script eguloi dhore rakhe.
+- YuNet (`FACE_BACKEND=auto`): startup e CPU vs OpenCL race hoy, j fast
+  seta ney — slow OpenCL kokhono pick hoy na (Mesa/rusticl issue fix).
+- WHENet (`HEADPOSE_PROVIDER=auto`): GPU provider try + CPU fallback.
+- MiVOLO bg thread e chole — infer loop kokhono 1s block hoy na;
+  natun face e 1 sec `Unknown` theke result ase.
+- `/api/health` e `hw` (dri/rknpu list), `face_backend`,
+  `headpose_providers`, `npu_active` dekha jay.
+
+## Speed tuning (board slow hole)
+- `TORCH_THREADS=2 ORT_THREADS=1` (default) — 8-core board e thread fight komay.
+  PC te (12+ core) `4/2` barate paro.
+- `MIVOLO_REFRESH=3.0` — bg worker load komay (age update 3s por por).
+- `IMG_SIZE=256` — YOLO ~40% fast, accuracy ektu kombe.
+- `DETECT_EVERY=3 FACE_EVERY=3` — box update kom, stream eki thakbe.
+- `MIVOLO_ENABLE=0` — sobcheye vari model off (gender/age lagbe na hole).
+- 1 browser tab e dekho — proti tab alada JPEG encode kore (N tab = Nx load).
 
 ## RK3576 note
 - Base image `python:3.11-slim` → arm64/amd64 duitai chole, tai same Dockerfile board + PC te cholbe.

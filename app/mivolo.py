@@ -5,6 +5,7 @@ Pipeline fit: YOLO person box = body, YuNet box = face.
 Output per face: gender (Male/Female + conf), age (years)
 """
 import os
+import threading
 
 import cv2
 import numpy as np
@@ -109,6 +110,8 @@ class MiVOLOAgeGender:
         # e vul age ase). 0 korle check off.
         self.blur_thr = float(os.getenv("MIVOLO_BLUR", "80"))
         self._cache = []  # {box, gender, gconf, age, t}
+        # bg worker thread + infer thread duitai cache touch kore
+        self._clock = threading.RLock()
         self.runs = 0   # model forward count (cache miss)
         self.hits = 0   # cache hit count
         self.last_ms = 0.0  # last forward time
@@ -151,29 +154,31 @@ class MiVOLOAgeGender:
     def _cached(self, box):
         """Fresh cache hit thakle (gender, gconf, age) dao, naile None."""
         import time
-        now = time.time()
-        best, best_iou = None, 0.0
-        for c in self._cache:
-            iou = self._iou(box, c["box"])
-            if iou > best_iou:
-                best, best_iou = c, iou
-        if best is not None and best_iou >= self.iou_thr \
-                and now - best["t"] < self.refresh_sec:
-            best["box"] = box  # track movement
-            return best["gender"], best["gconf"], best["age"]
-        return None
+        with self._clock:
+            now = time.time()
+            best, best_iou = None, 0.0
+            for c in self._cache:
+                iou = self._iou(box, c["box"])
+                if iou > best_iou:
+                    best, best_iou = c, iou
+            if best is not None and best_iou >= self.iou_thr \
+                    and now - best["t"] < self.refresh_sec:
+                best["box"] = box  # track movement
+                return best["gender"], best["gconf"], best["age"]
+            return None
 
     def _stale(self, box):
         """Somoy par holeo ager value (blur/side frame e reuse er jonno)."""
-        best, best_iou = None, 0.0
-        for c in self._cache:
-            iou = self._iou(box, c["box"])
-            if iou > best_iou:
-                best, best_iou = c, iou
-        if best is not None and best_iou >= self.iou_thr:
-            best["box"] = box
-            return best["gender"], best["gconf"], best["age"]
-        return None
+        with self._clock:
+            best, best_iou = None, 0.0
+            for c in self._cache:
+                iou = self._iou(box, c["box"])
+                if iou > best_iou:
+                    best, best_iou = c, iou
+            if best is not None and best_iou >= self.iou_thr:
+                best["box"] = box
+                return best["gender"], best["gconf"], best["age"]
+            return None
 
     @staticmethod
     def _blur_score(crop: np.ndarray) -> float:
@@ -191,26 +196,27 @@ class MiVOLOAgeGender:
         import statistics
         import time
         now = time.time()
-        for c in self._cache:
-            if self._iou(box, c["box"]) >= self.iou_thr:
-                c["ages"] = [(t, a) for (t, a) in c.get("ages", []) + [(now, age)]
-                             if now - t <= max(self.window_sec, 5.0)][-10:]
-                c["genders"] = [(t, g) for (t, g) in c.get("genders", []) + [(now, gender)]
-                                if now - t <= max(self.window_sec, 5.0)][-10:]
-                win_a = [a for (t, a) in c["ages"] if now - t <= self.window_sec]
-                win_g = [g for (t, g) in c["genders"] if now - t <= self.window_sec]
-                med = int(statistics.median(win_a)) if win_a else c.get("age", age)
-                top = collections.Counter(win_g).most_common(1)[0][0] if win_g \
-                    else c.get("gender", gender)
-                c.update({"box": box, "gender": top,
-                          "gconf": gconf, "age": med, "t": now})
-                return top, med
-        self._cache.append({"box": box, "gender": gender,
-                            "gconf": gconf, "age": age,
-                            "ages": [(now, age)], "genders": [(now, gender)],
-                            "t": now})
-        self._cache = self._cache[-20:]  # memory bound
-        return gender, age
+        with self._clock:
+            for c in self._cache:
+                if self._iou(box, c["box"]) >= self.iou_thr:
+                    c["ages"] = [(t, a) for (t, a) in c.get("ages", []) + [(now, age)]
+                                 if now - t <= max(self.window_sec, 5.0)][-10:]
+                    c["genders"] = [(t, g) for (t, g) in c.get("genders", []) + [(now, gender)]
+                                    if now - t <= max(self.window_sec, 5.0)][-10:]
+                    win_a = [a for (t, a) in c["ages"] if now - t <= self.window_sec]
+                    win_g = [g for (t, g) in c["genders"] if now - t <= self.window_sec]
+                    med = int(statistics.median(win_a)) if win_a else c.get("age", age)
+                    top = collections.Counter(win_g).most_common(1)[0][0] if win_g \
+                        else c.get("gender", gender)
+                    c.update({"box": box, "gender": top,
+                              "gconf": gconf, "age": med, "t": now})
+                    return top, med
+            self._cache.append({"box": box, "gender": gender,
+                                "gconf": gconf, "age": age,
+                                "ages": [(now, age)], "genders": [(now, gender)],
+                                "t": now})
+            self._cache = self._cache[-20:]  # memory bound
+            return gender, age
 
     @staticmethod
     def _body_for_face(face_box, bodies):
@@ -221,6 +227,34 @@ class MiVOLOAgeGender:
             if b[0] <= cx <= b[2] and b[1] <= cy <= b[3]:
                 return b
         return None
+
+    def fill_from_cache(self, faces, min_side: int = 60):
+        """Heavy model NA chaliye cache theke gender/age fill (<1ms).
+
+        Infer loop theke call hoy — kokhono block kore na. Natun face e
+        Unknown thake, bg worker model chaliye cache vorle porer frame e ase.
+        """
+        if self.model is None:
+            return faces
+        for fc in faces:
+            x1, y1, x2, y2 = fc["box"]
+            if min(x2 - x1, y2 - y1) < min_side:
+                fc.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
+                continue
+            hit = self._cached(fc["box"])
+            if hit is not None:
+                g, gc, a = hit
+                self.hits += 1
+                fc.update({"gender": g, "gconf": gc, "age": a})
+                continue
+            stale = self._stale(fc["box"])
+            if stale is not None:
+                g, gc, a = stale
+                self.hits += 1
+                fc.update({"gender": g, "gconf": gc, "age": a})
+            else:
+                fc.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
+        return faces
 
     def predict_frame(self, frame: np.ndarray, faces, bodies,
                       min_side: int = 60):
@@ -278,6 +312,10 @@ class MiVOLOAgeGender:
                 bx2, by2 = min(b[2], W), min(b[3], H)
                 if bx2 > bx1 and by2 > by1:
                     bcrop = frame[by1:by2, bx1:bx2]
+            if bcrop is None:
+                # BUGFIX: body na pele age processor(images=[..., None])
+                # crash kore puro batch Unknown hoto. Face-only fallback.
+                bcrop = fcrop
             # LAG FIX: 1 frame e max_faces er besi model chalabe na
             if len(todo) >= max(1, self.max_faces):
                 deferred.append(fc)
@@ -300,10 +338,12 @@ class MiVOLOAgeGender:
             import time
             torch = self.torch
             t0 = time.time()
-            f_in = self.processor(images=[t[1] for t in todo])["pixel_values"]
-            b_in = self.processor(images=[t[2] for t in todo])["pixel_values"]
-            f_in = f_in.to(dtype=torch.float32)
-            b_in = b_in.to(dtype=torch.float32)
+            # 1 batched preprocess (age 2 bar call hoto: face + body alada)
+            n = len(todo)
+            crops = [t[1] for t in todo] + [t[2] for t in todo]
+            all_in = self.processor(images=crops)["pixel_values"].to(
+                dtype=torch.float32)
+            f_in, b_in = all_in[:n], all_in[n:]
             # LAG FIX: inference_mode + no_grad er cheye kom overhead
             with torch.inference_mode():
                 out = self.model(faces_input=f_in, body_input=b_in)

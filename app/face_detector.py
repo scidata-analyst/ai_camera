@@ -33,21 +33,83 @@ class YuNetFace:
         self.score_thr = float(os.getenv("FACE_SCORE", str(score)))
         self.enabled = os.getenv("FACE_ENABLE", "1") == "1"
         self.detector = None
+        # FACE_BACKEND=auto|cpu|opencl.
+        # auto = CPU vs OpenCL 1-frame race e j fast seta (kokhono slow hobe na).
+        self.backend_want = os.getenv("FACE_BACKEND", "auto").lower()
+        self.backend_used = "cpu"
+        self.input_size = input_size
         if not self.enabled:
             return
         try:
             path = ensure_model(model_path)
+            backend, target = self._pick_backend(path, input_size)
             self.detector = cv2.FaceDetectorYN_create(
                 path, "", input_size,
                 self.score_thr, 0.3, 5000,
-                cv2.dnn.DNN_BACKEND_OPENCV,
-                cv2.dnn.DNN_TARGET_CPU,
+                backend, target,
             )
             self.model_path = path
+            self.backend_used = "opencl" if target == cv2.dnn.DNN_TARGET_OPENCL else "cpu"
+            print(f"[face] YuNet backend={self.backend_used} ({path})")
             self._last_hw = None  # LAG FIX: setInputSize cache
         except Exception as e:
             print(f"[face] YuNet disabled: {e}")
             self.detector = None
+
+    def _pick_backend(self, path, input_size):
+        """auto: OpenCL thakle CPU vs OpenCL race, fast ta nao.
+        Mesa/rusticl OpenCL onek somoy CPU er cheye SLOW hoy — na mepe
+        OpenCL nile ager theke slow hobe. Race e seta dhora pore."""
+        want = os.getenv("FACE_BACKEND", "auto").lower()
+        cpu = (cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU)
+        ocl = (cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_OPENCL)
+        if want == "cpu":
+            return cpu
+        try:
+            from .accel import dri_devices, opencl_available
+            has_gpu = bool(dri_devices())
+        except Exception:
+            has_gpu = False
+        if want == "opencl":
+            return ocl if (has_gpu and opencl_available()) else cpu
+        # auto
+        if not (has_gpu and opencl_available()):
+            return cpu
+        try:
+            from .accel import try_enable_opencl
+            import numpy as _np
+            import time as _t
+            probe = (_np.random.rand(240, 320, 3) * 255).astype(_np.uint8)
+            d_cpu = cv2.FaceDetectorYN_create(
+                path, "", input_size, self.score_thr, 0.3, 5000, *cpu)
+            d_cpu.setInputSize((320, 240))
+            d_ocl = cv2.FaceDetectorYN_create(
+                path, "", input_size, self.score_thr, 0.3, 5000, *ocl)
+            d_ocl.setInputSize((320, 240))
+            d_cpu.detect(probe)  # warmup
+            t0 = _t.time()
+            for _ in range(3):
+                d_cpu.detect(probe)
+            t_cpu = (_t.time() - t0) / 3
+            try:
+                d_ocl.detect(probe)  # warmup (fail korte pare)
+                t0 = _t.time()
+                for _ in range(3):
+                    d_ocl.detect(probe)
+                t_ocl = (_t.time() - t0) / 3
+            except Exception as e:
+                print(f"[face] OpenCL race fail, CPU: {e}")
+                return cpu
+            print(f"[face] backend race: cpu={t_cpu*1000:.1f}ms "
+                  f"opencl={t_ocl*1000:.1f}ms")
+            if t_ocl < t_cpu * 0.9:  # 10%+ fast holei OpenCL
+                try_enable_opencl(True)
+                return ocl
+            try_enable_opencl(False)  # slow OpenCL global cv2 keo slow korto
+            return cpu
+        except Exception as e:
+            print(f"[face] backend race skip, CPU: {e}")
+            return cpu
 
     def detect(self, frame: np.ndarray):
         """Return list of {box, conf, landmarks}. Empty jodi disabled."""

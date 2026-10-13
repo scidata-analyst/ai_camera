@@ -36,6 +36,14 @@ try:
     cv2.setNumThreads(max(1, min(4, int(os.getenv("TORCH_THREADS", "4")))))
 except Exception:
     pass
+# NPU/GPU info: /dev/dri/renderD129 (Mali) + /dev/rknpu (NPU) detect + log
+try:
+    from .accel import hw_summary
+    _HW = hw_summary()
+    print(f"[hw] {_HW}")
+except Exception as e:
+    _HW = {}
+    print(f"[hw] accel check skip: {e}")
 
 app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)")
 
@@ -159,6 +167,11 @@ def health():
             "backend": getattr(detector, "backend", "cpu"),
             "rknn_model": getattr(detector, "rknn_path", None),
             "npu_active": getattr(detector, "rknn", None) is not None,
+            "hw": _HW,
+            "face_backend": getattr(getattr(detector, "face", None),
+                                    "backend_used", "off"),
+            "headpose_providers": getattr(getattr(detector, "headpose", None),
+                                          "providers", []),
             "face_enabled": FACE_ENABLE,
             "face_loaded": detector.face_enabled,
             "face_min_size": FACE_MIN_SIZE,
