@@ -14,7 +14,7 @@ services:
       - "/dev/dri/renderD129:/dev/dri/renderD129"
       - "/dev/dri:/dev/dri"
       # NPU (RKNN) — board e /dev/rknpu thakle uncomment koro:
-      - "/dev/rknpu:/dev/rknpu"
+      # - "/dev/rknpu:/dev/rknpu"
     group_add:
       - video
       - render
