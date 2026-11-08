@@ -21,7 +21,7 @@ services:
     volumes:
       - ./models:/app/models
     environment:
-      - CAMERA_SOURCE=0
+      - CAMERA_SOURCE=/dev/video11
       - YOLO_BACKEND=auto
       - RKNN_MODEL=/app/models/yolo11n-rk3576.rknn
       - RKNPU_CORE=AUTO
