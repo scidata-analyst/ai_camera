@@ -8,13 +8,13 @@ services:
     container_name: ai-camera
     network_mode: host
     devices:
-      - "/dev/video11:/dev/video0"
+      - "/dev/video11:/dev/video11"
       # /dev/dri mount korle board er renderD129 (Mali GPU) container e ase.
       # Explicit path chaile niche line uncomment koro (host e file thakte hobe):
-      # - "/dev/dri/renderD129:/dev/dri/renderD129"
+      - "/dev/dri/renderD129:/dev/dri/renderD129"
       - "/dev/dri:/dev/dri"
       # NPU (RKNN) — board e /dev/rknpu thakle uncomment koro:
-      # - "/dev/rknpu:/dev/rknpu"
+      - "/dev/rknpu:/dev/rknpu"
     group_add:
       - video
       - render
