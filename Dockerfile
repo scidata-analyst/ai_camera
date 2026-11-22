@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 ARG TARGETARCH
+ARG RKNN_VERSION=2.5.0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -52,7 +53,8 @@ RUN pip install --upgrade pip "setuptools<81" wheel && \
     pip install --no-deps --retries 5 --timeout 120 ultralytics==8.3.253 && \
     pip install --no-deps --no-build-isolation https://github.com/WildChlamydia/MiVOLO/archive/37475e3f8818b5f22448003feec3e64b01bfb188.tar.gz && \
     if [ "$(uname -m)" = "aarch64" ] || [ "$TARGETARCH" = "arm64" ]; then \
-      pip install rknn-toolkit-lite2; \
+      pip install "rknn-toolkit-lite2==${RKNN_VERSION}" && \
+      python -c "from urllib.request import urlretrieve; urlretrieve('https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v${RKNN_VERSION}/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so', '/usr/lib/librknnrt.so')"; \
     else \
       echo "[docker] x86 build: rknn-toolkit-lite2 skipped"; \
     fi && \
