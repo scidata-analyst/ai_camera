@@ -1,4 +1,0 @@
-services:
-  ai-camera:
-    devices:
-      - "/dev/rknpu:/dev/rknpu"

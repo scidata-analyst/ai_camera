@@ -1,10 +1,8 @@
-"""Hardware accel helper: NPU (/dev/rknpu) + GPU (/dev/dri/renderD129) detect.
+"""Detect Rockchip NPU character devices and DRM render-node drivers.
 
-RK3576 te:
-  /dev/rknpu            = NPU (RKNNLite YOLO)
-  /dev/dri/renderD129  = Mali GPU (OpenCL: YuNet/WHENet offload)
-Board e renderD128/D129 naam bodlate pare, tai /dev/dri/* scan kori.
-x86 dev PC te renderD128 (Intel iGPU) thakleo same code safe fallback hoy.
+On some Rockchip Ubuntu images, RKNPU is exposed as a DRM node such as
+/dev/dri/renderD129 instead of /dev/rknpu. Read the sysfs driver link so the
+health endpoint does not mistake every render node for a GPU.
 """
 import glob
 import os
@@ -23,16 +21,36 @@ def rknpu_devices() -> list:
     return sorted(glob.glob(RKNPU_GLOB))
 
 
+def dri_driver_map() -> dict:
+    """Map each DRM render node to its kernel driver when sysfs exposes it."""
+    result = {}
+    for path in dri_devices():
+        node = os.path.basename(path)
+        driver_link = f"/sys/class/drm/{node}/device/driver"
+        if os.path.exists(driver_link):
+            result[path] = os.path.basename(os.path.realpath(driver_link))
+        else:
+            result[path] = None
+    return result
+
+
 def hw_summary() -> dict:
     dri = dri_devices()
     rknpu = rknpu_devices()
+    drivers = dri_driver_map()
+    npu_dri = sorted(path for path, driver in drivers.items()
+                     if driver and "rknpu" in driver.lower())
+    gpu_drivers = ("mali", "panfrost")
     return {
         "render_explicit": EXPLICIT_RENDER,
         "render_exists": os.path.exists(EXPLICIT_RENDER),
         "dri": dri,
+        "dri_drivers": drivers,
+        "npu_dri": npu_dri,
         "rknpu": rknpu,
-        "has_gpu": len(dri) > 0,
-        "has_npu": len(rknpu) > 0,
+        "has_gpu": any(driver and any(g in driver.lower() for g in gpu_drivers)
+                        for driver in drivers.values()),
+        "has_npu": bool(rknpu or npu_dri),
     }
 
 
