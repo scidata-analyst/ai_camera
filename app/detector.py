@@ -81,6 +81,8 @@ class HumanDetector:
             except Exception as e:
                 print(f"[yolo] NPU init fail, CPU fallback: {e}")
                 self.rknn = None
+        elif self.backend in ("auto", "rknn"):
+            print(f"[yolo] RKNN model missing, CPU fallback: {self.rknn_path}")
         if self.rknn is not None:
             self.backend = "rknn"
             self.model = None
@@ -242,10 +244,9 @@ class HumanDetector:
         else:
             pred = pred[0]  # (N,84)
         boxes_cxcywh = pred[:, :4]
-        logits = pred[:, 4:]
-        # ONNX/RKNN output raw logits (measure: max ~316, min 0) — prob ante
-        # sigmoid lagbe, naile conf threshold vul comparison hoy
-        scores = 1.0 / (1.0 + _np.exp(-_np.clip(logits, -50, 50)))
+        # Ultralytics YOLO11 export already applies sigmoid to class scores.
+        # Applying it again would inflate every confidence to >= 0.5.
+        scores = pred[:, 4:]
         cls_ids = _np.argmax(scores, axis=1)
         confs = scores[_np.arange(len(scores)), cls_ids]
         keep = confs >= self.conf
