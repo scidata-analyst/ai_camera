@@ -88,7 +88,8 @@ http://localhost:8080/api/health
 ## NPU / GPU (RK3576, renderD129)
 - `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache. Ei Ubuntu/Rockchip
   setup-e RKNPU `/dev/dri/renderD129` hisebe expose hoy; eta `/dev/rknpu` node
-  na-o hote pare. Health response-er `dri_drivers` e `RKNPU` dekha uchit.
+  na-o hote pare. Compose-e ei node ebong `/proc/device-tree/compatible`
+  RKNN Lite-er jonno container-e map kora ache.
 - NPU (RKNN YOLO): `models/yolo11n-rk3576.rknn` file ta board e thakte hobe.
   `/dev/dri:/dev/dri` mount NPU render node container-e dey; `.rknn` file ba
   NPU runtime/device init na hole app CPU fallback kore. Model convert korte:
