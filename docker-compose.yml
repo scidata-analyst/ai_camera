@@ -6,6 +6,7 @@ services:
     image: ai-camera:rk3576
     pull_policy: never
     container_name: ai-camera
+    privileged: true
     network_mode: host
     devices:
       - "/dev/video11:/dev/video11"
@@ -17,6 +18,7 @@ services:
       - "44"
       - "108"
     volumes:
+      - "/sys:/sys:ro"
       - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
       - ./models:/app/models
     environment:
