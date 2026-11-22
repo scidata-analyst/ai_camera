@@ -10,10 +10,11 @@ USB webcam (`/dev/video0`) theke frame niye YOLOv11n + YuNet + MiVOLO diye detec
 ## Quick start (RK3576 / Linux)
 
 ```bash
-# 1. RK3576 board e build + run (NPU device soho)
-docker compose -f docker-compose.yml -f docker-compose.rk3576.yml up --build
+# 1. build + run (camera soho)
+docker compose up --build
 
-# laptop/dev machine e NPU device chara run:
+# camera chara test (laptop e /dev/video0 na thakle)
+# docker-compose.yml e camera device mapping comment kore:
 docker compose up --build
 
 # 2. browser e kholo
@@ -85,13 +86,12 @@ http://localhost:8080/api/health
 - Web UI panel o 1 sec por por auto-refresh hoy (stable M/W soho).
 
 ## NPU / GPU (RK3576, renderD129)
-- `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache — board er
-  `/dev/dri/renderD129` (Mali GPU) auto container e ase.
-  Explicit path lagle `- "/dev/dri/renderD129:/dev/dri/renderD129"` uncomment koro.
+- `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache. Ei Ubuntu/Rockchip
+  setup-e RKNPU `/dev/dri/renderD129` hisebe expose hoy; eta `/dev/rknpu` node
+  na-o hote pare. Health response-er `dri_drivers` e `RKNPU` dekha uchit.
 - NPU (RKNN YOLO): `models/yolo11n-rk3576.rknn` file ta board e thakte hobe.
-  RK3576-er jonno `docker-compose.rk3576.yml` `/dev/rknpu` container e mount
-  kore; `.rknn` file ba NPU runtime/device init na hole app CPU fallback kore.
-  Model convert korte:
+  `/dev/dri:/dev/dri` mount NPU render node container-e dey; `.rknn` file ba
+  NPU runtime/device init na hole app CPU fallback kore. Model convert korte:
   Export (PC te 1 bar):
   ```bash
   pip install rknn-toolkit2 ultralytics onnx
@@ -100,8 +100,7 @@ http://localhost:8080/api/health
   # python tools/export_rknn.py --quant i8 --dataset calib.txt --imgsz 320
   ```
   Export seshe `models/yolo11n-rk3576.rknn` board-er project-er `models/`
-  folder-e copy kore `docker compose -f docker-compose.yml -f docker-compose.rk3576.yml up --build -d`
-  chalao. `/api/health` e
+  folder-e copy kore `docker compose up --build -d` chalao. `/api/health` e
   `backend: "rknn"` ebong `npu_active: true` hole YOLO NPU-te cholche.
   Ei RKNN path sudhu YOLO detector-er jonno; YuNet, MiVOLO, WHENet-er
   backend alada ebong egulo ekhono RKNN NPU-te cholche na.
