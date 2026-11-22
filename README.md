@@ -93,7 +93,9 @@ http://localhost:8080/api/health
   access runtime-er container check-er jonno deoa ache.
 - NPU (RKNN YOLO): `models/yolo11n-rk3576.rknn` file ta board e thakte hobe.
   `/dev/dri:/dev/dri` mount NPU render node container-e dey; `.rknn` file ba
-  NPU runtime/device init na hole app CPU fallback kore. Model convert korte:
+  NPU runtime/device init na hole app CPU fallback kore. ARM64 image build-e
+  `rknn-toolkit-lite2` ebong matching version-er `librknnrt.so` install hoy.
+  Model convert korte:
   Export (PC te 1 bar):
   ```bash
   pip install rknn-toolkit2 ultralytics onnx
