@@ -9,14 +9,15 @@ services:
     network_mode: host
     devices:
       - "/dev/video11:/dev/video11"
-      # /dev/dri mount korle board er renderD129 (Mali GPU) container e ase.
-      # Explicit path chaile niche line uncomment koro (host e file thakte hobe):
-      # - "/dev/dri/renderD129:/dev/dri/renderD129"
+      # Ubuntu/Rockchip target-e renderD129 holo RKNPU device.
       - "/dev/dri:/dev/dri"
+      # RKNN Lite checks this exact NPU node inside Docker.
+      - "/dev/dri/renderD129:/dev/dri/renderD129"
     group_add:
       - "44"
       - "108"
     volumes:
+      - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
       - ./models:/app/models
     environment:
       - CAMERA_SOURCE=/dev/video11
