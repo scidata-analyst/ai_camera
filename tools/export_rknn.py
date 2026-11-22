@@ -12,7 +12,7 @@ Usage:
 
 Note (app/app/detector.py _run_rknn er sathe contract):
   - input : NCHW RGB float32 0-1, square imgsz (letterbox app code e hoy)
-  - output: (1,84,N) raw logits (sigmoid app code e hoy) — COCO 80 class
+  - output: (1,84,N) decoded boxes + sigmoid class probabilities — COCO 80 class
 """
 import argparse
 import os

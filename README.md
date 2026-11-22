@@ -10,11 +10,10 @@ USB webcam (`/dev/video0`) theke frame niye YOLOv11n + YuNet + MiVOLO diye detec
 ## Quick start (RK3576 / Linux)
 
 ```bash
-# 1. build + run (camera soho)
-docker compose up --build
+# 1. RK3576 board e build + run (NPU device soho)
+docker compose -f docker-compose.yml -f docker-compose.rk3576.yml up --build
 
-# camera chara test (laptop e /dev/video0 na thakle)
-# docker-compose.yml e devices line comment kore:
+# laptop/dev machine e NPU device chara run:
 docker compose up --build
 
 # 2. browser e kholo
@@ -89,9 +88,10 @@ http://localhost:8080/api/health
 - `docker-compose.yml` e `/dev/dri:/dev/dri` mount ache — board er
   `/dev/dri/renderD129` (Mali GPU) auto container e ase.
   Explicit path lagle `- "/dev/dri/renderD129:/dev/dri/renderD129"` uncomment koro.
-- NPU (RKNN YOLO): board e `/dev/rknpu` thakle oi line uncomment koro +
-  `yolo11n.pt → .rknn` model `/app/models/yolo11n-rk3576.rknn` e rakho.
-  File/device na thakle safe CPU fallback, crash korbe na.
+- NPU (RKNN YOLO): `models/yolo11n-rk3576.rknn` file ta board e thakte hobe.
+  RK3576-er jonno `docker-compose.rk3576.yml` `/dev/rknpu` container e mount
+  kore; `.rknn` file ba NPU runtime/device init na hole app CPU fallback kore.
+  Model convert korte:
   Export (PC te 1 bar):
   ```bash
   pip install rknn-toolkit2 ultralytics onnx
@@ -99,8 +99,14 @@ http://localhost:8080/api/health
   # int8 (fast, calib image list lagbe):
   # python tools/export_rknn.py --quant i8 --dataset calib.txt --imgsz 320
   ```
-  Note: `.rknn` output raw logits dey — sigmoid app code e hoy
-  (measure kora: ONNX output max ~316 = raw). onnx input naam `images`,
+  Export seshe `models/yolo11n-rk3576.rknn` board-er project-er `models/`
+  folder-e copy kore `docker compose -f docker-compose.yml -f docker-compose.rk3576.yml up --build -d`
+  chalao. `/api/health` e
+  `backend: "rknn"` ebong `npu_active: true` hole YOLO NPU-te cholche.
+  Ei RKNN path sudhu YOLO detector-er jonno; YuNet, MiVOLO, WHENet-er
+  backend alada ebong egulo ekhono RKNN NPU-te cholche na.
+  Note: YOLO11 ONNX/RKNN output-e class probability agei sigmoid kora thake;
+  app abar sigmoid kore na. onnx input naam `images`,
   `[1,3,H,W]` — script eguloi dhore rakhe.
 - YuNet (`FACE_BACKEND=auto`): startup e CPU vs OpenCL race hoy, j fast
   seta ney — slow OpenCL kokhono pick hoy na (Mesa/rusticl issue fix).
