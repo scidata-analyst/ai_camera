@@ -105,19 +105,26 @@ def _most_common(values):
 
 
 class FaceAttributeSmoother:
-    """1-sec per-face age/gender mode smoother.
+    """1-sec per-face age/gender average smoother.
 
     Frame-e joto face (ar human) dekha jay, sob prediction 1 sec window-e
-    joma kori. Box-IoU diye eki face-er track dhore, tar gender/age-er
-    most-common (mode) value label-e dekhai — flicker komay.
+    joma kori. Box-IoU diye eki face-er track dhore:
+
+      * age  = window-er sob age-er average (round)
+      * gender = average signed confidence (+Male / -Female), so low-confidence
+        flicker label-e ase na
+      * latest good value kichu sec porjonto stick kore — label hut kore
+        hatiye jay na.
     """
 
     def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.35,
-                 max_tracks: int = 100):
+                 max_tracks: int = 100, hold_sec: float = 5.0):
         self.window_sec = float(window_sec)
         self.iou_thr = float(iou_thr)
         self.max_tracks = int(max_tracks)
-        self.tracks: list = []  # {box, samples: deque[(t,gender,age,conf)]}
+        self.hold_sec = max(float(hold_sec), self.window_sec)
+        # track = {box, samples: deque[(t, signed_conf, age)], last_good: dict}
+        self.tracks: list = []
 
     @staticmethod
     def _iou(a, b) -> float:
@@ -138,12 +145,28 @@ class FaceAttributeSmoother:
                 best, best_iou = track, iou
         return best if best_iou >= self.iou_thr else None
 
+    @staticmethod
+    def _signed(gender: str, conf: float) -> float:
+        return float(conf) if gender == "Male" else -float(conf)
+
     def _prune(self, now: float):
         cutoff = now - self.window_sec
         for track in self.tracks:
             while track["samples"] and track["samples"][0][0] < cutoff:
                 track["samples"].popleft()
-        self.tracks = [t for t in self.tracks if t["samples"]][-self.max_tracks:]
+        # Sticky value kothono expire hoy na; max_tracks-e hole oldest badlo.
+        self.tracks.sort(key=lambda t: (
+            t["last_good"]["t"] if t["last_good"] else 0.0))
+        self.tracks = self.tracks[-self.max_tracks:]
+
+    def latest(self):
+        """Most recent good (gender, age, conf) across all tracks."""
+        best = None
+        for track in self.tracks:
+            good = track["last_good"]
+            if good and (best is None or good["t"] > best["t"]):
+                best = good
+        return best
 
     def add(self, faces):
         """Store instant predictions. Only call when a fresh face infer ran."""
@@ -153,36 +176,70 @@ class FaceAttributeSmoother:
             age = face.get("age")
             if gender in (None, "", "Unknown") or age in (None, 0):
                 continue
+            conf = max(0.0, min(1.0, float(face.get("gconf", 0.0))))
+            signed = self._signed(str(gender), conf)
             box = [int(v) for v in face["box"]]
             track = self._match(box)
             if track is None:
-                track = {"box": box, "samples": collections.deque()}
+                track = {"box": box, "samples": collections.deque(),
+                         "last_good": None}
                 self.tracks.append(track)
             track["box"] = box
-            track["samples"].append(
-                (now, str(gender), int(age), float(face.get("gconf", 0.0))))
+            track["samples"].append((now, signed, int(age)))
+            track["last_good"] = {
+                "t": now, "gender": str(gender), "age": int(age), "conf": conf}
         self._prune(now)
 
     def fill(self, faces):
-        """Overwrite each face with the 1-sec mode of gender and age."""
+        """Write 1-sec average gender/age onto each face (sticky fallback)."""
         now = time.time()
         self._prune(now)
         for face in faces:
-            track = self._match([int(v) for v in face["box"]])
-            if track is None or not track["samples"]:
-                continue
+            box = [int(v) for v in face["box"]]
+            track = self._match(box)
+            if track is None:
+                # Face already has a good value? Adopt it without adding a sample.
+                if face.get("gender") not in (None, "", "Unknown") \
+                        and face.get("age") not in (None, 0):
+                    track = {"box": box, "samples": collections.deque(),
+                             "last_good": {
+                                 "t": now, "gender": str(face["gender"]),
+                                 "age": int(face["age"]),
+                                 "conf": float(face.get("gconf", 0.0))}}
+                    self.tracks.append(track)
+                else:
+                    # Dummy track: nicher global sticky fallback label debe.
+                    track = {"box": box, "samples": collections.deque(),
+                             "last_good": None}
             samples = track["samples"]
-            genders = [s[1] for s in samples]
-            ages = [s[2] for s in samples]
-            gender = _most_common(genders)
-            age = _most_common(ages)
-            confs = [s[3] for s in samples if s[1] == gender]
+            if samples:
+                signed_mean = sum(s[1] for s in samples) / len(samples)
+                age_mean = sum(s[2] for s in samples) / len(samples)
+                gender = "Male" if signed_mean >= 0 else "Female"
+                age = int(round(age_mean))
+                conf = abs(signed_mean)
+                samples_n = len(samples)
+                method = "mean"
+            elif track["last_good"]:
+                good = track["last_good"]
+                gender, age, conf = good["gender"], good["age"], good["conf"]
+                samples_n, method = 0, "sticky"
+            else:
+                # Kono track na mileo label hide korbo na — latest known bole deo.
+                good = self.latest()
+                if good:
+                    gender, age, conf = (
+                        good["gender"], good["age"], good["conf"])
+                    method = "sticky-global"
+                else:
+                    gender, age, conf, method = "Unknown", 0, 0.0, "default"
+                samples_n = 0
             face.update({
                 "gender": gender,
-                "age": int(age),
-                "gconf": round(sum(confs) / max(len(confs), 1), 3),
-                "age_mode_samples": collections.Counter(ages)[age],
-                "gender_mode_samples": collections.Counter(genders)[gender],
-                "attr_samples": len(samples),
+                "age": age,
+                "gconf": round(conf, 3),
+                "attr_samples": samples_n,
+                "attr_method": method,
+                "attr_sticky": True,
             })
         return faces

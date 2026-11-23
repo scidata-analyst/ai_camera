@@ -90,7 +90,7 @@ class HumanDetector:
         self.headpose_enabled = self.headpose is not None and self.headpose.loaded
         self.smoother = CountSmoother(window_sec=window_sec)
         self.smoothed = self.smoother.current
-        # 1-sec window-e sob face-er age/gender prediction joma kore mode dey.
+        # 1-sec window-e sob face-er age/gender prediction average kore dey.
         self.attr_smoother = FaceAttributeSmoother(window_sec=window_sec)
         self._t_prev = time.time()
         self._fps_smooth = 0.0
@@ -355,7 +355,7 @@ class HumanDetector:
                     self._last_faces_cache = [dict(f) for f in faces]
                 else:
                     faces = [dict(f) for f in self._last_faces_cache]
-                # Mode (most common) age/gender over the 1-sec window.
+                # 1-sec average age/gender, sticky label (no flicker/disappear).
                 self.attr_smoother.fill(faces)
                 RetinaFace.draw(frame, faces)
             except Exception as e:
@@ -380,7 +380,7 @@ class HumanDetector:
         non_human_n = 0
 
         def _face_for_human(d: Dict):
-            """Human box-er moddhe thaka (mode-smoothed) face khujo."""
+            """Human box-er moddhe thaka (average-smoothed) face khujo."""
             x1, y1, x2, y2 = d["box"]
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
             best, best_area = None, None
@@ -398,11 +398,14 @@ class HumanDetector:
                 continue
             x1, y1, x2, y2 = d["box"]
             face = _face_for_human(d)
-            if face is not None and face.get("gender") not in (None, "Unknown"):
-                label = (f"Human {face['gender']} {face['age']}y "
-                         f"{d['conf']:.2f}")
+            if face is not None:
+                gender = face.get("gender") or "Unknown"
+                age = face.get("age", 0)
             else:
-                label = f"Human {d['conf']:.2f}"
+                good = self.attr_smoother.latest()
+                gender = good["gender"] if good else "Unknown"
+                age = good["age"] if good else 0
+            label = f"Human {gender} {age}y {d['conf']:.2f}"
             color = (0, 255, 0)  # green
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
