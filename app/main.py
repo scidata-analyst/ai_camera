@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from .camera import CameraStream
 from .detector import HumanDetector
 
-MODEL_NAME = os.getenv("MODEL_NAME", "yolo11n.pt")
+MODEL_NAME = os.getenv("MODEL_NAME", "models/yolo11n.pt")
 CONF = float(os.getenv("CONF_THRESHOLD", "0.5"))
 IMGSZ = int(os.getenv("IMG_SIZE", "320"))  # LAG FIX: 384->320 default (CPU ~40% fast)
 JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))  # 70->60: encode fast + bandwidth kom
@@ -162,14 +162,33 @@ def index():
 
 @app.get("/api/health")
 def health():
+    face_backend = getattr(getattr(detector, "face", None),
+                           "backend_used", "off")
+    mivolo_backend = getattr(getattr(detector, "mivolo", None),
+                             "backend", "off")
+    headpose_backend = getattr(getattr(detector, "headpose", None),
+                               "backend", "off")
+    model_backends = {
+        "object_detection": getattr(detector, "backend", "cpu"),
+        "face_detection": face_backend,
+        "age_gender": mivolo_backend,
+        "head_pose": headpose_backend,
+    }
     return {"status": "ok", "camera_connected": camera.connected,
             "model": MODEL_NAME, "conf": CONF, "imgsz": IMGSZ,
             "backend": getattr(detector, "backend", "cpu"),
             "rknn_model": getattr(detector, "rknn_path", None),
             "npu_active": getattr(detector, "rknn", None) is not None,
+            "model_backends": model_backends,
+            "all_models_npu_active": all(
+                backend == "rknn" for backend in model_backends.values()),
             "hw": _HW,
-            "face_backend": getattr(getattr(detector, "face", None),
-                                    "backend_used", "off"),
+            "face_backend": face_backend,
+            "face_rknn_model": getattr(getattr(detector, "face", None),
+                                        "rknn_path", None),
+            "headpose_backend": headpose_backend,
+            "headpose_rknn_model": getattr(getattr(detector, "headpose", None),
+                                            "rknn_path", None),
             "headpose_providers": getattr(getattr(detector, "headpose", None),
                                           "providers", []),
             "face_enabled": FACE_ENABLE,
@@ -177,6 +196,9 @@ def health():
             "face_min_size": FACE_MIN_SIZE,
             "mivolo_enabled": MIVOLO_ENABLE,
             "mivolo_loaded": detector.mivolo_enabled,
+            "mivolo_backend": mivolo_backend,
+            "mivolo_rknn_model": getattr(getattr(detector, "mivolo", None),
+                                          "rknn_path", None),
             "headpose_enabled": HEADPOSE_ENABLE,
             "headpose_loaded": detector.headpose_enabled,
             "infer_fps": round(_infer_fps, 1)}

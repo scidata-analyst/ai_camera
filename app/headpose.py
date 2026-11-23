@@ -30,12 +30,14 @@ def ensure_model(path: str = DEFAULT_PATH) -> str:
 
 class HeadPoseEstimator:
     def __init__(self, model_path: str = DEFAULT_PATH):
-        import onnxruntime as ort
-
         self.enabled = os.getenv("HEADPOSE_ENABLE", "1") == "1"
         self.yaw_thr = float(os.getenv("LOOK_YAW", "25"))
         self.pitch_thr = float(os.getenv("LOOK_PITCH", "20"))
         self.session = None
+        self.rknn = None
+        self.rknn_path = os.getenv(
+            "HEADPOSE_RKNN_MODEL", "/app/models/whenet-rk3576.rknn")
+        self.backend = "off"
         self.input_name = None
         self.providers = ["CPUExecutionProvider"]
         # bg worker cache: infer loop instant fill, worker refresh kore.
@@ -49,6 +51,42 @@ class HeadPoseEstimator:
             return
         try:
             path = ensure_model(model_path)
+            want = os.getenv("HEADPOSE_BACKEND", "auto").lower()
+            if want in ("auto", "rknn") and os.path.isfile(self.rknn_path):
+                try:
+                    from rknnlite.api import RKNNLite
+                    self.rknn = RKNNLite()
+                    ret = self.rknn.load_rknn(self.rknn_path)
+                    if ret != 0:
+                        raise RuntimeError(f"load_rknn ret={ret}")
+                    core = os.getenv("RKNPU_CORE", "AUTO")
+                    load_kw = {}
+                    if core.upper() not in ("AUTO", ""):
+                        try:
+                            load_kw["core_mask"] = int(core)
+                        except ValueError:
+                            pass
+                    ret = (self.rknn.init_runtime(**load_kw) if load_kw
+                           else self.rknn.init_runtime())
+                    if ret != 0:
+                        raise RuntimeError(f"init_runtime ret={ret}")
+                    self.backend = "rknn"
+                    self.providers = ["RKNN NPU"]
+                    print(f"[headpose] WHENet RKNN NPU active: "
+                          f"{self.rknn_path} core={core}")
+                    return
+                except Exception as e:
+                    print(f"[headpose] RKNN init failed, using ONNX: {e}")
+                    try:
+                        if self.rknn is not None:
+                            self.rknn.release()
+                    except Exception:
+                        pass
+                    self.rknn = None
+            elif want == "rknn":
+                print(f"[headpose] RKNN model missing: {self.rknn_path}; "
+                      "using ONNX fallback")
+
             import onnxruntime as _ort
             # LAG FIX: thread limit + graph opt -> CPU te fast, GIL block kom
             import os as _os
@@ -67,18 +105,32 @@ class HeadPoseEstimator:
                     _os.getenv("HEADPOSE_PROVIDER", "auto"))
             except Exception:
                 providers = ["CPUExecutionProvider"]
-            self.session = ort.InferenceSession(
+            self.session = _ort.InferenceSession(
                 path, sess_options=so, providers=providers)
             self.providers = self.session.get_providers()
             self.input_name = self.session.get_inputs()[0].name
+            self.backend = "onnx"
             print(f"[headpose] loaded {path} (threads={nth} prov={self.providers})")
         except Exception as e:
             print(f"[headpose] disabled: {e}")
             self.session = None
+            self.rknn = None
+            self.backend = "off"
 
     @property
     def loaded(self) -> bool:
-        return self.session is not None
+        return self.session is not None or self.rknn is not None
+
+    def _infer(self, batch: np.ndarray) -> np.ndarray:
+        if self.rknn is not None:
+            # WHENet RKNN has static batch=1; submit one face per NPU call.
+            rows = []
+            for sample in batch:
+                outputs = self.rknn.inference(inputs=[
+                    np.ascontiguousarray(sample[None, ...], dtype=np.float32)])
+                rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
+            return np.asarray(rows, dtype=np.float32)
+        return self.session.run(None, {self.input_name: batch})[0]
 
     def _preprocess(self, crop: np.ndarray) -> np.ndarray:
         img = cv2.resize(crop, (IN_SIZE, IN_SIZE))
@@ -89,7 +141,7 @@ class HeadPoseEstimator:
     def predict_crop(self, crop: np.ndarray):
         """-> (yaw, pitch, roll) degree."""
         blob = self._preprocess(crop)
-        out = self.session.run(None, {self.input_name: blob})[0][0]
+        out = self._infer(blob)[0]
         yaw, roll, pitch = float(out[0]), float(out[1]), float(out[2])
         return yaw, pitch, roll
 
@@ -128,7 +180,7 @@ class HeadPoseEstimator:
 
     def fill_from_cache(self, faces):
         """Infer loop theke instant fill (<1ms, block na)."""
-        if self.session is None:
+        if not self.loaded:
             return faces
         import time
         now = time.time()
@@ -149,7 +201,7 @@ class HeadPoseEstimator:
 
     def predict_frame(self, frame: np.ndarray, faces, min_side: int = 40):
         """faces e yaw/pitch/roll/looking bosiye dey (in-place)."""
-        if self.session is None:
+        if not self.loaded:
             return faces
         H, W = frame.shape[:2]
         # LAG FIX: per-face run() er bodle 1 batch e chalao.
@@ -186,7 +238,7 @@ class HeadPoseEstimator:
         if blobs:
             try:
                 batch = np.stack(blobs, axis=0).astype(np.float32)
-                out = self.session.run(None, {self.input_name: batch})[0]
+                out = self._infer(batch)
                 for row, i in zip(out, idxs):
                     yaw, roll, pitch = float(row[0]), float(row[1]), float(row[2])
                     looking = bool(abs(yaw) <= self.yaw_thr

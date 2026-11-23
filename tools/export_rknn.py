@@ -48,8 +48,9 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int,
     # mean/std: app code already /255 float32 pathay, tai norm off (std=1)
     rknn.config(target_platform=target,
                 mean_values=[[0, 0, 0]], std_values=[[1, 1, 1]])
-    ret = rknn.load_onnx(model=onnx_path, inputs=["images"],
-                         input_size_list=[[3, imgsz, imgsz]])
+    # Ultralytics exports a fixed NCHW input shape. Let Toolkit2 read it from
+    # ONNX metadata; its crop/input overrides can reinterpret NCHW dimensions.
+    ret = rknn.load_onnx(model=onnx_path)
     if ret != 0:
         raise SystemExit(f"[export] load_onnx fail ret={ret}")
     ret = rknn.build(do_quantization=do_quant,
@@ -69,7 +70,7 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int,
 
 def main():
     ap = argparse.ArgumentParser(description="YOLO pt -> RK3576 rknn")
-    ap.add_argument("--model", default="yolo11n.pt")
+    ap.add_argument("--model", default="models/yolo11n.pt")
     ap.add_argument("--imgsz", type=int, default=320)
     ap.add_argument("--target", default="rk3576")
     ap.add_argument("--quant", default="fp", choices=["fp", "i8", "int8"])

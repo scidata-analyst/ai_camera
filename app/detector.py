@@ -112,7 +112,7 @@ class HumanDetector:
                             "male": 0, "female": 0, "fps": 0.0}
         self.last_faces = []
         self.face = YuNetFace() if face_enable else None
-        self.face_enabled = self.face is not None and self.face.detector is not None
+        self.face_enabled = self.face is not None and self.face.loaded
         self.mivolo = MiVOLOAgeGender() if (mivolo_enable and self.face_enabled) else None
         self.mivolo_enabled = self.mivolo is not None and self.mivolo.loaded
         self.headpose = HeadPoseEstimator() if (headpose_enable and self.face_enabled) else None

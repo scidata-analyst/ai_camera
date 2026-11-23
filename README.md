@@ -30,7 +30,9 @@ http://localhost:8080/api/health
 | Var | Default | Note |
 |-----|---------|------|
 | CAMERA_SOURCE | 0 | `/dev/video0`, RTSP URL ba video file o cholbe |
-| MODEL_NAME | yolo11n.pt | `yolo11n/s/m` |
+| MODEL_NAME | /app/models/yolo11n.pt | YOLO weights ekhanei download hoy; export-o `models/` e hoy |
+| YOLO_BACKEND | rknn | RKNN model/runtime na hole CPU fallback |
+| RKNN_MODEL | /app/models/yolo11n-rk3576.rknn | YOLO RK3576 model |
 | CONF_THRESHOLD | 0.5 | 0.3-0.7 |
 | IMG_SIZE | 384 | 320=fast, 480=accurate, 384=balance (32 er multiple) |
 | FRAME_WIDTH/HEIGHT | 640x480 | camera resolution |
@@ -39,14 +41,19 @@ http://localhost:8080/api/health
 | FACE_ENABLE | 1 | 0 korle face off |
 | FACE_SCORE | 0.6 | YuNet conf threshold |
 | FACE_MODEL | /app/models/yunet.onnx | auto-download hoy |
+| FACE_BACKEND | rknn | `rknn/auto/cpu/opencl`; RKNN init fail hole OpenCV fallback |
+| FACE_RKNN_MODEL | /app/models/yunet-rk3576.rknn | YuNet RK3576 model |
 | FACE_MIN_SIZE | 60 | choto face e gender Unknown (vul prediction komate) |
 | MIVOLO_ENABLE | 1 | 0 korle age/gender off |
-| MIVOLO_MODEL | iitolstykh/mivolo_v2 | HF cache e download (~115MB) |
+| MIVOLO_MODEL | /app/models/mivolo_v2 | local MiVOLO checkpoint folder (~115MB) |
+| MIVOLO_BACKEND | rknn | RKNN runtime fail hole CPU fallback |
+| MIVOLO_RKNN_MODEL | /app/models/mivolo_v2_rk3576.rknn | converted MiVOLO model path |
 | MIVOLO_REFRESH | 1.0 | proti sec e re-check -> sec proti median (barale CPU kombbe) |
 | MIVOLO_BLUR | 80 | er niche sharpness hole age refresh off (motion blur fix) |
 | FACE_EVERY | 2 | YuNet proti N infer e 1 bar, majhe box reuse (CPU ~30% save) |
-| FACE_BACKEND | auto | `auto/cpu/opencl` — race e fast ta ney, kokhono slow hoy na |
 | HEADPOSE_PROVIDER | auto | ORT provider list, auto = GPU try + CPU fallback |
+| HEADPOSE_BACKEND | rknn | `rknn/auto/onnx`; RKNN init fail hole ONNX fallback |
+| HEADPOSE_RKNN_MODEL | /app/models/whenet-rk3576.rknn | WHENet RK3576 model |
 | OPENCV_OPENCL | auto | `auto/off` — race jit-lei OpenCL on |
 | HEADPOSE_ENABLE | 1 | 0 korle looking off |
 | HEADPOSE_MODEL | /app/models/whenet.onnx | auto-download (PINTO0309, 17MB) |
@@ -57,6 +64,17 @@ http://localhost:8080/api/health
 - Tai YOLO slow holeo video atke na — box update infer rate e (~2-8fps) hoy.
 - `IMG_SIZE` komale box update fast, barale accuracy valo.
 
+## Model files
+- Download kora ebong converted model `models/` folder-e rakha hoy. App-er
+  YOLO `.pt` download path `/app/models/yolo11n.pt`; YuNet/WHENet ONNX,
+  MiVOLO checkpoint, ebong char-ti RKNN model-o ei mounted folder-e thake.
+- Export scripts manual bhabe chalate hoy; `docker compose build` ba `up`
+  konotai model export/conversion start kore na. Compose sudhu age theke thaka
+  `models/` artifacts mount kore app chalaye.
+- MiVOLO checkpoint ekhane `models/mivolo_v2/`; RK3576 conversion ekhane
+  `models/mivolo_v2_rk3576.rknn`. YOLO conversion ekhane
+  `models/yolo11n-rk3576.rknn`.
+
 ## Looking at camera (WHENet head pose)
 - Per face: `yaw/pitch/roll` degree + `looking` bool.
 - `|yaw|<=25° and |pitch|<=20°` → **Looking** (green box + 👀 label).
@@ -66,7 +84,9 @@ http://localhost:8080/api/health
 - Per face: `gender Male/Female + gconf` + `age` (bochor). Adience gender 97.3.
 - Input dual: YuNet face crop + YOLO human box (body); body na pele face-only.
 - Video label: `M0.91 27y` / `F0.93 24y`; `/api/faces` e full JSON; header e `M:x W:y` count.
-- Note: MiVOLO vari (28.7M, ~1s/face CPU) — tai face cache ache: ekoi face e
+- RK3576 e `mivolo_v2_rk3576.rknn` thakle MiVOLO RKNN NPU-te chole;
+  file na thakle ba runtime unavailable hole PyTorch CPU fallback hoy.
+- Face cache ache: ekoi face e
   proti sec e 1 bar re-check hoy, majher frame e cache theke (0ms).
   1-sec window er readings er median/majority = oi sec er result.
 - **Movement fix:** blurry frame (motion blur) ba side-face e age refresh hoy na —
@@ -91,7 +111,9 @@ http://localhost:8080/api/health
   na-o hote pare. Compose-e ei node ebong `/proc/device-tree/compatible`
   RKNN Lite-er jonno map kora ache; `/sys` read-only mount ebong privileged
   access runtime-er container check-er jonno deoa ache.
-- NPU (RKNN YOLO): `models/yolo11n-rk3576.rknn` file ta board e thakte hobe.
+- NPU (RKNN): `models/` folder-e YOLO, YuNet, MiVOLO, WHENet-er RKNN files
+  thakte hobe. Compose-e char model-er backend `rknn` set ache; NPU/runtime
+  init fail hole app fallback backend ney, `/api/health` e active backend dekho.
   `/dev/dri:/dev/dri` mount NPU render node container-e dey; `.rknn` file ba
   NPU runtime/device init na hole app CPU fallback kore. ARM64 image build-e
   `rknn-toolkit-lite2` ebong matching version-er `librknnrt.so` install hoy.
@@ -106,18 +128,31 @@ http://localhost:8080/api/health
   Export seshe `models/yolo11n-rk3576.rknn` board-er project-er `models/`
   folder-e copy kore `docker compose up --build -d` chalao. `/api/health` e
   `backend: "rknn"` ebong `npu_active: true` hole YOLO NPU-te cholche.
-  Ei RKNN path sudhu YOLO detector-er jonno; YuNet, MiVOLO, WHENet-er
-  backend alada ebong egulo ekhono RKNN NPU-te cholche na.
+  `/api/health` e `backend`, `face_backend`, `mivolo_backend`,
+  `headpose_backend` sob `rknn` hole char-ti neural network-i NPU-te active.
+  `./models` volume-er madhyome `.rknn` files container-e mount hoy. PC theke
+  RK3576 board-e `models/` folder copy kore `docker compose up --build -d`
+  chalao. Exporter chalate:
+  ```bash
+  python tools/export_mivolo_rknn.py
+  ```
+  ONNX theke YuNet/WHENet convert korte:
+  ```bash
+  python tools/export_onnx_rknn.py --model models/yunet.onnx \
+    --out models/yunet-rk3576.rknn
+  python tools/export_onnx_rknn.py --model models/whenet.onnx \
+    --out models/whenet-rk3576.rknn
+  ```
   Note: YOLO11 ONNX/RKNN output-e class probability agei sigmoid kora thake;
   app abar sigmoid kore na. onnx input naam `images`,
   `[1,3,H,W]` — script eguloi dhore rakhe.
-- YuNet (`FACE_BACKEND=auto`): startup e CPU vs OpenCL race hoy, j fast
-  seta ney — slow OpenCL kokhono pick hoy na (Mesa/rusticl issue fix).
-- WHENet (`HEADPOSE_PROVIDER=auto`): GPU provider try + CPU fallback.
+- YuNet face NMS/box decode ebong model-er image pre/postprocessing CPU-te hoy;
+  neural network inference NPU-te hoy.
+- WHENet fallback-e `HEADPOSE_PROVIDER=auto` diye ONNX provider select hoy.
 - MiVOLO bg thread e chole — infer loop kokhono 1s block hoy na;
   natun face e 1 sec `Unknown` theke result ase.
 - `/api/health` e `hw` (dri/rknpu list), `face_backend`,
-  `headpose_providers`, `npu_active` dekha jay.
+  `mivolo_backend`, `headpose_backend`, `npu_active` dekha jay.
 
 ## Speed tuning (board slow hole)
 - `TORCH_THREADS=2 ORT_THREADS=1` (default) — 8-core board e thread fight komay.
@@ -131,7 +166,9 @@ http://localhost:8080/api/health
 ## RK3576 note
 - Base image `python:3.11-slim` → arm64/amd64 duitai chole, tai same Dockerfile board + PC te cholbe.
 - Stream ~25fps constant; box update CPU onujayi ~2-8fps (thread decoupled).
-- NPU (RKNN) lagle `yolo11n.pt → .rknn` + YuNet/Gender INT8 convert korte hobe.
+- RKNN NPU model path: YOLO exporter `models/yolo11n-rk3576.rknn` toiri kore;
+  MiVOLO age/gender exporter `models/mivolo_v2_rk3576.rknn` toiri kore.
+  YuNet face detection ebong WHENet head pose ekhono ONNX backend-e chole.
 - Camera permission issue hole `privileged: true` uncomment koro ba `sudo usermod -aG video $USER`.
 
 ## Dev (docker chara)

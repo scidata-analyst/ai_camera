@@ -33,14 +33,52 @@ class YuNetFace:
         self.score_thr = float(os.getenv("FACE_SCORE", str(score)))
         self.enabled = os.getenv("FACE_ENABLE", "1") == "1"
         self.detector = None
-        # FACE_BACKEND=auto|cpu|opencl.
-        # auto = CPU vs OpenCL 1-frame race e j fast seta (kokhono slow hobe na).
+        self.rknn = None
+        self.rknn_path = os.getenv(
+            "FACE_RKNN_MODEL", "/app/models/yunet-rk3576.rknn")
+        # FACE_BACKEND=auto|rknn|cpu|opencl. auto tries RKNN first.
         self.backend_want = os.getenv("FACE_BACKEND", "auto").lower()
-        self.backend_used = "cpu"
+        self.backend_used = "off"
         self.input_size = input_size
         if not self.enabled:
             return
         try:
+            if self.backend_want in ("auto", "rknn") and os.path.isfile(
+                    self.rknn_path):
+                try:
+                    from rknnlite.api import RKNNLite
+                    self.rknn = RKNNLite()
+                    ret = self.rknn.load_rknn(self.rknn_path)
+                    if ret != 0:
+                        raise RuntimeError(f"load_rknn ret={ret}")
+                    core = os.getenv("RKNPU_CORE", "AUTO")
+                    load_kw = {}
+                    if core.upper() not in ("AUTO", ""):
+                        try:
+                            load_kw["core_mask"] = int(core)
+                        except ValueError:
+                            pass
+                    ret = (self.rknn.init_runtime(**load_kw) if load_kw
+                           else self.rknn.init_runtime())
+                    if ret != 0:
+                        raise RuntimeError(f"init_runtime ret={ret}")
+                    self.model_path = self.rknn_path
+                    self.backend_used = "rknn"
+                    print(f"[face] YuNet RKNN NPU active: {self.rknn_path} "
+                          f"core={core}")
+                    return
+                except Exception as e:
+                    print(f"[face] RKNN init failed, trying OpenCV: {e}")
+                    try:
+                        if self.rknn is not None:
+                            self.rknn.release()
+                    except Exception:
+                        pass
+                    self.rknn = None
+            elif self.backend_want == "rknn":
+                print(f"[face] RKNN model missing: {self.rknn_path}; "
+                      "using OpenCV fallback")
+
             path = ensure_model(model_path)
             backend, target = self._pick_backend(path, input_size)
             self.detector = cv2.FaceDetectorYN_create(
@@ -55,6 +93,10 @@ class YuNetFace:
         except Exception as e:
             print(f"[face] YuNet disabled: {e}")
             self.detector = None
+
+    @property
+    def loaded(self) -> bool:
+        return self.detector is not None or self.rknn is not None
 
     def _pick_backend(self, path, input_size):
         """auto: OpenCL thakle CPU vs OpenCL race, fast ta nao.
@@ -113,6 +155,8 @@ class YuNetFace:
 
     def detect(self, frame: np.ndarray):
         """Return list of {box, conf, landmarks}. Empty jodi disabled."""
+        if self.rknn is not None:
+            return self._detect_rknn(frame)
         if self.detector is None:
             return []
         h, w = frame.shape[:2]
@@ -136,6 +180,82 @@ class YuNetFace:
             out.append({"box": [x1, y1, x2, y2],
                         "conf": round(conf, 3), "landmarks": lms})
         return out
+
+    def _detect_rknn(self, frame: np.ndarray):
+        """Run fixed 640x640 YuNet on NPU and decode its 12 output tensors."""
+        h, w = frame.shape[:2]
+        size = 640
+        scale = min(size / w, size / h)
+        rw, rh = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+        resized = cv2.resize(frame, (rw, rh), interpolation=cv2.INTER_LINEAR)
+        pad_x, pad_y = (size - rw) // 2, (size - rh) // 2
+        padded = np.zeros((size, size, 3), dtype=np.uint8)
+        padded[pad_y:pad_y + rh, pad_x:pad_x + rw] = resized
+        blob = np.transpose(padded.astype(np.float32), (2, 0, 1))[None]
+        try:
+            outputs = self.rknn.inference(inputs=[np.ascontiguousarray(blob)])
+            if len(outputs) != 12:
+                raise RuntimeError(f"expected 12 YuNet outputs, got {len(outputs)}")
+
+            boxes, scores, landmarks = [], [], []
+            for level, stride in enumerate((8, 16, 32)):
+                cols = size // stride
+                rows = size // stride
+                count = rows * cols
+                cls = np.asarray(outputs[level], dtype=np.float32).reshape(count)
+                obj = np.asarray(outputs[level + 3], dtype=np.float32).reshape(count)
+                bbox = np.asarray(outputs[level + 6], dtype=np.float32).reshape(
+                    count, 4)
+                kps = np.asarray(outputs[level + 9], dtype=np.float32).reshape(
+                    count, 10)
+                confidence = np.sqrt(np.clip(cls, 0.0, 1.0)
+                                     * np.clip(obj, 0.0, 1.0))
+                for idx in np.flatnonzero(confidence >= self.score_thr):
+                    row, col = divmod(int(idx), cols)
+                    values = bbox[idx]
+                    cx = (col + float(values[0])) * stride
+                    cy = (row + float(values[1])) * stride
+                    bw = float(np.exp(np.clip(values[2], -10.0, 10.0))) * stride
+                    bh = float(np.exp(np.clip(values[3], -10.0, 10.0))) * stride
+                    x1 = (cx - bw / 2 - pad_x) / scale
+                    y1 = (cy - bh / 2 - pad_y) / scale
+                    x2 = (cx + bw / 2 - pad_x) / scale
+                    y2 = (cy + bh / 2 - pad_y) / scale
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+                    points = []
+                    for p in range(5):
+                        px = (float(kps[idx, 2 * p]) + col) * stride
+                        py = (float(kps[idx, 2 * p + 1]) + row) * stride
+                        px = int(np.clip((px - pad_x) / scale, 0, w - 1))
+                        py = int(np.clip((py - pad_y) / scale, 0, h - 1))
+                        points.append([px, py])
+                    boxes.append([int(round(x1)), int(round(y1)),
+                                  int(round(x2 - x1)), int(round(y2 - y1))])
+                    scores.append(float(confidence[idx]))
+                    landmarks.append(points)
+
+            if not boxes:
+                return []
+            keep = cv2.dnn.NMSBoxes(
+                boxes, scores, self.score_thr, 0.3, top_k=5000)
+            indices = np.asarray(keep).reshape(-1).tolist() if len(keep) else []
+            result = []
+            for i in indices:
+                x, y, bw, bh = boxes[int(i)]
+                result.append({
+                    "box": [x, y, min(w, x + bw), min(h, y + bh)],
+                    "conf": round(scores[int(i)], 3),
+                    "landmarks": landmarks[int(i)],
+                })
+            return result
+        except Exception as e:
+            if not getattr(self, "_rknn_warned", False):
+                print(f"[face] RKNN inference failed: {e}")
+                self._rknn_warned = True
+            return []
 
     @staticmethod
     def draw(frame: np.ndarray, faces) -> np.ndarray:

@@ -74,7 +74,7 @@ def patch_timm():
 
 patch_timm()
 
-MODEL_ID = os.getenv("MIVOLO_MODEL", "iitolstykh/mivolo_v2")
+MODEL_ID = os.getenv("MIVOLO_MODEL", "models/mivolo_v2")
 
 
 class MiVOLOAgeGender:
@@ -117,8 +117,15 @@ class MiVOLOAgeGender:
         self.last_ms = 0.0  # last forward time
         self.model = None
         self.processor = None
+        self.rknn = None
+        self.backend = "off"
+        self.rknn_path = os.getenv(
+            "MIVOLO_RKNN_MODEL", "/app/models/mivolo_v2_rk3576.rknn")
         self.torch = torch
         self.id2label = {0: "Female", 1: "Male"}
+        self.age_min = 0.0
+        self.age_max = 122.0
+        self.avg_age = 61.0
         if not self.enabled:
             return
         try:
@@ -127,19 +134,58 @@ class MiVOLOAgeGender:
             config = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
             raw = getattr(config, "gender_id2label", None) or {}
             self.id2label = {int(k): str(v).capitalize() for k, v in raw.items()} or self.id2label
+            self.age_min = float(getattr(config, "min_age", 0.0))
+            self.age_max = float(getattr(config, "max_age", 122.0))
+            self.avg_age = float(getattr(config, "avg_age", 61.0))
             self.processor = AutoImageProcessor.from_pretrained(
                 model_id, trust_remote_code=True)
-            self.model = AutoModelForImageClassification.from_pretrained(
-                model_id, trust_remote_code=True,
-                torch_dtype=torch.float32).to("cpu").eval()
-            print(f"[mivolo] loaded {model_id} labels={self.id2label}")
+            want = os.getenv("MIVOLO_BACKEND", "auto").lower()
+            if want in ("auto", "rknn") and os.path.isfile(self.rknn_path):
+                try:
+                    from rknnlite.api import RKNNLite
+                    self.rknn = RKNNLite()
+                    ret = self.rknn.load_rknn(self.rknn_path)
+                    if ret != 0:
+                        raise RuntimeError(f"load_rknn ret={ret}")
+                    core = os.getenv("RKNPU_CORE", "AUTO")
+                    load_kw = {}
+                    if core.upper() not in ("AUTO", ""):
+                        try:
+                            load_kw["core_mask"] = int(core)
+                        except ValueError:
+                            pass
+                    ret = (self.rknn.init_runtime(**load_kw) if load_kw
+                           else self.rknn.init_runtime())
+                    if ret != 0:
+                        raise RuntimeError(f"init_runtime ret={ret}")
+                    self.backend = "rknn"
+                    print(f"[mivolo] RKNN NPU active: {self.rknn_path} core={core}")
+                except Exception as e:
+                    print(f"[mivolo] RKNN init failed, using CPU: {e}")
+                    try:
+                        if self.rknn is not None:
+                            self.rknn.release()
+                    except Exception:
+                        pass
+                    self.rknn = None
+            elif want == "rknn":
+                print(f"[mivolo] RKNN model missing: {self.rknn_path}; using CPU")
+
+            if self.rknn is None:
+                self.model = AutoModelForImageClassification.from_pretrained(
+                    model_id, trust_remote_code=True,
+                    torch_dtype=torch.float32).to("cpu").eval()
+                self.backend = "cpu"
+                print(f"[mivolo] loaded {model_id} on CPU labels={self.id2label}")
         except Exception as e:
             print(f"[mivolo] disabled: {e}")
             self.model = None
+            self.rknn = None
+            self.backend = "off"
 
     @property
     def loaded(self) -> bool:
-        return self.model is not None
+        return self.model is not None or self.rknn is not None
 
     @staticmethod
     def _iou(a, b) -> float:
@@ -234,7 +280,7 @@ class MiVOLOAgeGender:
         Infer loop theke call hoy — kokhono block kore na. Natun face e
         Unknown thake, bg worker model chaliye cache vorle porer frame e ase.
         """
-        if self.model is None:
+        if self.model is None and self.rknn is None:
             return faces
         for fc in faces:
             x1, y1, x2, y2 = fc["box"]
@@ -266,7 +312,7 @@ class MiVOLOAgeGender:
         - Age = sesh 5 reading er median (flicker-free).
         (looking flag headpose theke ase — detector e headpose age chole.)
         """
-        if self.model is None:
+        if self.model is None and self.rknn is None:
             return faces
         H, W = frame.shape[:2]
         # LAG FIX: boro face age (gender er jonno important), choto pore
@@ -345,13 +391,35 @@ class MiVOLOAgeGender:
                 dtype=torch.float32)
             f_in, b_in = all_in[:n], all_in[n:]
             # LAG FIX: inference_mode + no_grad er cheye kom overhead
-            with torch.inference_mode():
-                out = self.model(faces_input=f_in, body_input=b_in)
+            if self.rknn is not None:
+                face_np = f_in.detach().cpu().numpy()
+                body_np = b_in.detach().cpu().numpy()
+                raw_rows = []
+                # Exported RKNN graph has fixed batch size 1.
+                for i in range(n):
+                    model_input = np.concatenate(
+                        (face_np[i:i + 1], body_np[i:i + 1]), axis=1)
+                    outputs = self.rknn.inference(inputs=[
+                        np.ascontiguousarray(model_input, dtype=np.float32)])
+                    raw_rows.append(np.asarray(outputs[0]).reshape(-1)[:3])
+                raw = np.asarray(raw_rows, dtype=np.float32)
+                logits = raw[:, :2]
+                shifted = logits - np.max(logits, axis=1, keepdims=True)
+                probs = np.exp(shifted)
+                probs /= np.maximum(np.sum(probs, axis=1, keepdims=True), 1e-12)
+                gidx = np.argmax(probs, axis=1).tolist()
+                gprob = probs[np.arange(n), gidx].tolist()
+                ages = (raw[:, 2] * (self.age_max - self.age_min)
+                        + self.avg_age).tolist()
+                self.runs += n
+            else:
+                with torch.inference_mode():
+                    out = self.model(faces_input=f_in, body_input=b_in)
+                ages = out.age_output.detach().cpu().view(-1).tolist()
+                gidx = out.gender_class_idx.detach().cpu().view(-1).tolist()
+                gprob = out.gender_probs.detach().cpu().view(-1).tolist()
+                self.runs += 1
             self.last_ms = round((time.time() - t0) * 1000, 1)
-            self.runs += 1
-            ages = out.age_output.detach().cpu().view(-1).tolist()
-            gidx = out.gender_class_idx.detach().cpu().view(-1).tolist()
-            gprob = out.gender_probs.detach().cpu().view(-1).tolist()
             for (fc, _, _), a, gi, gp in zip(todo, ages, gidx, gprob):
                 g = self.id2label.get(int(gi), "Unknown")
                 g = "Male" if g.lower().startswith("m") else (
