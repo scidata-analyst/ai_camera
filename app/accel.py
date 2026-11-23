@@ -56,15 +56,61 @@ def hw_summary() -> dict:
     }
 
 
+def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
+    """Read the layout the RKNN runtime was actually compiled for."""
+    try:
+        details = rknn.get_input_details()
+        if details and index < len(details):
+            d = details[index]
+            return (str(d.get("layout", "")).lower(),
+                    tuple(int(v) for v in d.get("shape", ())))
+    except Exception:
+        pass
+    return "", ()
+
+
+def _as_4d(blob: np.ndarray, layout: str) -> np.ndarray:
+    """RKNN requires a batch dimension; a bare HWC/NCHW array is rejected."""
+    if blob.ndim == 3:
+        return np.ascontiguousarray(blob[np.newaxis, ...])
+    return blob
+
+
+def _reorder(blob: np.ndarray, src: str, dst: str) -> np.ndarray:
+    if not src or not dst or src == dst:
+        return blob
+    if src == "nchw" and dst == "nhwc":
+        return np.ascontiguousarray(np.transpose(blob, (0, 2, 3, 1)))
+    if src == "nhwc" and dst == "nchw":
+        return np.ascontiguousarray(np.transpose(blob, (0, 3, 1, 2)))
+    return blob
+
+
 def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
-    """Run RKNNLite.inference with an explicit input layout.
+    """Run RKNNLite.inference with an explicit 4D input layout.
 
     Lite2 defaults data_format to NHWC when it is omitted. That silently
     misreads an NCHW float blob as (N=1, H=3, W=H, C=W) and produces garbage
-    detections (typically everything becomes COCO 'person'). Always state the
-    real layout of the array we pass. Older runtimes reject the kwargs, so
-    fall back to the historical call in that case.
+    detections (typically everything becomes COCO 'person'). These RK3576
+    models are compiled for NHWC, so normalize every call to the runtime's
+    reported layout and never send a 3D array.
     """
+    blob = _as_4d(blob, layout)
+    runtime_layout, runtime_shape = _runtime_input_layout(rknn)
+    if runtime_layout in ("nchw", "nhwc"):
+        blob = _reorder(blob, layout, runtime_layout)
+        layout = runtime_layout
+    elif len(runtime_shape) == 4:
+        # Some Lite releases omit 'layout' but still expose the shape.
+        if runtime_shape[-1] in (1, 3, 4) and blob.shape[1] in (1, 3, 4) \
+                and blob.shape[-1] not in (1, 3, 4):
+            blob = _reorder(blob, "nchw", "nhwc")
+            layout = "nhwc"
+        elif runtime_shape[1] in (1, 3, 4) and blob.shape[-1] in (1, 3, 4) \
+                and blob.shape[1] not in (1, 3, 4):
+            blob = _reorder(blob, "nhwc", "nchw")
+            layout = "nchw"
+
     kw = {"inputs": [blob], "data_format": layout}
     if dtype:
         kw["data_type"] = dtype
@@ -73,16 +119,20 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
     except TypeError:
         return rknn.inference(inputs=[blob])
     except Exception as exc:
-        # Kono board-e runtime NCHW buffer accept na korle NHWC try koro.
-        if layout == "nchw" and blob.ndim == 4 and blob.shape[1] in (1, 3, 4):
-            hwc = np.ascontiguousarray(
-                np.transpose(blob[0], (1, 2, 3, 0))[np.newaxis, ...])
-            retry = {"inputs": [hwc], "data_format": "nhwc"}
+        # get_input_details() kono samoy compiled layout na janale other layout
+        # ekbar try koro. Batch dim thaklei 4D requirement fulfillment hoy.
+        other = "nhwc" if layout == "nchw" else "nchw"
+        if blob.ndim == 4 and blob.shape[0] == 1:
+            retry_blob = _reorder(blob, layout, other)
+            retry = {"inputs": [retry_blob], "data_format": other}
             if dtype:
                 retry["data_type"] = dtype
-            print(f"[rknn] NCHW inference failed ({exc}); retry NHWC")
-            return rknn.inference(**retry)
-        raise
+            try:
+                return rknn.inference(**retry)
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"RKNN inference failed ({exc}); tried {layout} and {other}") from exc
 
 
 def rknn_input_summary(rknn) -> dict:
@@ -101,42 +151,25 @@ def rknn_input_summary(rknn) -> dict:
         return {}
 
 
-def opencl_available() -> bool:
-    """OpenCL runtime sotti kaj kore kina (device thaklei hobe na)."""
-    if os.getenv("OPENCV_OPENCL", "auto").lower() == "off":
-        return False
-    try:
-        import cv2
-        return bool(cv2.ocl.haveOpenCL())
-    except Exception:
-        return False
+def rknn_load(path: str, label: str = "model") -> tuple:
+    """Load + init an RKNN model on NPU. No ONNX/CPU fallback, ever."""
+    if not path or not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"[{label}] RKNN model missing: {path} — CPU fallback disabled")
+    from rknnlite.api import RKNNLite
 
-
-def try_enable_opencl(on: bool = True) -> bool:
-    try:
-        import cv2
-        if not cv2.ocl.haveOpenCL():
-            return False
-        cv2.ocl.setUseOpenCL(bool(on))
-        return bool(cv2.ocl.useOpenCL()) if on else False
-    except Exception:
-        return False
-
-
-def pick_ort_providers(want: str = "auto") -> list:
-    """ONNXRuntime provider list. want=auto hole GPU provider try + CPU fallback."""
-    want = (want or "auto").lower()
-    try:
-        import onnxruntime as ort
-        avail = set(ort.get_available_providers())
-    except Exception:
-        return ["CPUExecutionProvider"]
-    if want not in ("auto", ""):
-        # explicit: "OpenVINOExecutionProvider,CPUExecutionProvider"
-        asked = [p.strip() for p in want.split(",") if p.strip()]
-        return [p for p in asked if p in avail] or ["CPUExecutionProvider"]
-    # auto: GPU-ish provider thakle age, sobses e CPU (crash-proof order)
-    order = ["OpenVINOExecutionProvider", "VitisAIExecutionProvider",
-             "OpenCLExecutionProvider", "CPUExecutionProvider"]
-    picked = [p for p in order if p in avail]
-    return picked or ["CPUExecutionProvider"]
+    rknn = RKNNLite()
+    ret = rknn.load_rknn(path)
+    if ret != 0:
+        raise RuntimeError(f"[{label}] load_rknn failed: ret={ret}")
+    core = os.getenv("RKNPU_CORE", "AUTO")
+    kw = {}
+    if core.upper() not in ("AUTO", ""):
+        try:
+            kw["core_mask"] = int(core)
+        except ValueError:
+            pass
+    ret = rknn.init_runtime(**kw) if kw else rknn.init_runtime()
+    if ret != 0:
+        raise RuntimeError(f"[{label}] init_runtime failed: ret={ret}")
+    return rknn, core

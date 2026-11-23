@@ -49,73 +49,18 @@ class HeadPoseEstimator:
         self._iou_thr = 0.4
         if not self.enabled:
             return
-        try:
-            path = ensure_model(model_path)
-            want = os.getenv("HEADPOSE_BACKEND", "auto").lower()
-            if want in ("auto", "rknn") and os.path.isfile(self.rknn_path):
-                try:
-                    from rknnlite.api import RKNNLite
-                    self.rknn = RKNNLite()
-                    ret = self.rknn.load_rknn(self.rknn_path)
-                    if ret != 0:
-                        raise RuntimeError(f"load_rknn ret={ret}")
-                    core = os.getenv("RKNPU_CORE", "AUTO")
-                    load_kw = {}
-                    if core.upper() not in ("AUTO", ""):
-                        try:
-                            load_kw["core_mask"] = int(core)
-                        except ValueError:
-                            pass
-                    ret = (self.rknn.init_runtime(**load_kw) if load_kw
-                           else self.rknn.init_runtime())
-                    if ret != 0:
-                        raise RuntimeError(f"init_runtime ret={ret}")
-                    self.backend = "rknn"
-                    self.providers = ["RKNN NPU"]
-                    print(f"[headpose] WHENet RKNN NPU active: "
-                          f"{self.rknn_path} core={core}")
-                    return
-                except Exception as e:
-                    print(f"[headpose] RKNN init failed, using ONNX: {e}")
-                    try:
-                        if self.rknn is not None:
-                            self.rknn.release()
-                    except Exception:
-                        pass
-                    self.rknn = None
-            elif want == "rknn":
-                print(f"[headpose] RKNN model missing: {self.rknn_path}; "
-                      "using ONNX fallback")
-
-            import onnxruntime as _ort
-            # LAG FIX: thread limit + graph opt -> CPU te fast, GIL block kom
-            import os as _os
-            nth = int(_os.getenv("ORT_THREADS",
-                                str(min(4, (_os.cpu_count() or 4)))))
-            so = _ort.SessionOptions()
-            so.intra_op_num_threads = max(1, nth)
-            so.inter_op_num_threads = 1
-            so.graph_optimization_level = (
-                _ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
-            # NPU/GPU: /dev/dri/renderD129 thakle GPU provider try, naile CPU.
-            # HEADPOSE_PROVIDER=auto (default) | CPUExecutionProvider | OpenVINO...
-            try:
-                from .accel import pick_ort_providers
-                providers = pick_ort_providers(
-                    _os.getenv("HEADPOSE_PROVIDER", "auto"))
-            except Exception:
-                providers = ["CPUExecutionProvider"]
-            self.session = _ort.InferenceSession(
-                path, sess_options=so, providers=providers)
-            self.providers = self.session.get_providers()
-            self.input_name = self.session.get_inputs()[0].name
-            self.backend = "onnx"
-            print(f"[headpose] loaded {path} (threads={nth} prov={self.providers})")
-        except Exception as e:
-            print(f"[headpose] disabled: {e}")
-            self.session = None
-            self.rknn = None
-            self.backend = "off"
+        want = os.getenv("HEADPOSE_BACKEND", "rknn").lower()
+        if want == "off":
+            return
+        if want not in ("rknn", ""):
+            raise RuntimeError(
+                f"HEADPOSE_BACKEND={want!r} is disabled in NPU-only mode")
+        from .accel import rknn_load
+        self.rknn, core = rknn_load(self.rknn_path, "headpose")
+        self.backend = "rknn"
+        self.providers = ["RKNN NPU"]
+        print(f"[headpose] WHENet RKNN NPU active: "
+              f"{self.rknn_path} core={core}")
 
     @property
     def loaded(self) -> bool:
@@ -126,10 +71,13 @@ class HeadPoseEstimator:
             # WHENet RKNN has static batch=1; submit one face per NPU call.
             rows = []
             for sample in batch:
-                blob = np.ascontiguousarray(sample[None, ...], dtype=np.float32)
+                # sample = (3,224,224) NCHW; RKNN wants (1,224,224,3) NHWC.
+                blob = np.ascontiguousarray(
+                    np.transpose(sample, (1, 2, 3, 0))[np.newaxis, ...],
+                    dtype=np.float32)
                 try:
                     from .accel import rknn_infer
-                    outputs = rknn_infer(self.rknn, blob, "nchw", "float32")
+                    outputs = rknn_infer(self.rknn, blob, "nhwc", "float32")
                 except ImportError:
                     outputs = self.rknn.inference(inputs=[blob])
                 if not outputs:

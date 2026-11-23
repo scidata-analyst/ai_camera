@@ -23,16 +23,10 @@ FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face e gender off
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
 
-# LAG FIX: thread pinning — sob lib sob core nile context-switch e lag
+# NPU-only mode: torch/onnxruntime load kora hoy na.
+# OpenCV pre/post-processing thread count bound rakho.
 try:
-    import torch as _torch
-    _nth = int(os.getenv("TORCH_THREADS", str(min(4, (os.cpu_count() or 4)))))
-    _torch.set_num_threads(max(1, _nth))
-    _torch.set_num_interop_threads(1)
-except Exception:
-    pass
-try:
-    cv2.setNumThreads(max(1, min(4, int(os.getenv("TORCH_THREADS", "4")))))
+    cv2.setNumThreads(max(1, min(4, int(os.getenv("CV_THREADS", "4")))))
 except Exception:
     pass
 # NPU/GPU info: /dev/dri/renderD129 (Mali) + /dev/rknpu (NPU) detect + log

@@ -22,15 +22,16 @@ services:
       - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
       - ./models:/app/models
     environment:
+      # NPU-only: proti model RKNN. CPU/ONNX fallback removed.
       - CAMERA_SOURCE=/dev/video11
       - YOLO_BACKEND=rknn
       - RKNN_MODEL=/app/models/yolo11n-rk3576.rknn
       - RKNPU_CORE=AUTO
       - MODEL_NAME=/app/models/yolo11n.pt
       - CONF_THRESHOLD=0.5
-      # person class er jonno alada (kodo) threshold — object-ke human banano komay
+      # person class er jonno alada threshold — object-ke human banano komay
       - PERSON_CONF=0.65
-      - PERSON_MIN_H=40
+      - PERSON_MIN_H=0
       - PERSON_REQUIRE_FACE=0
       - DET_STALE_SEC=0.2
       - YOLO_DEBUG=0
@@ -41,25 +42,18 @@ services:
       - STREAM_FPS=25
       - SMOOTH_WINDOW=1.0
       - DETECT_EVERY=2
-      - MAX_FACES=3
+      - MAX_FACES=0
       - FACE_EVERY=1
-      - FACE_BACKEND=rknn
-      - FACE_MODEL=/app/models/RetinaFace_mobile320.onnx
-      - FACE_RKNN_MODEL=/app/models/RetinaFace_mobile320-rk3576.rknn
-      - AGE_GENDER_BACKEND=rknn
-      - AGE_GENDER_MODEL=/app/models/genderage.onnx
-      - AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn
-      - HEADPOSE_PROVIDER=auto
-      - HEADPOSE_BACKEND=rknn
-      - HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn
-      - OPENCV_OPENCL=auto
-      - TORCH_THREADS=2
-      - ORT_THREADS=1
       - FACE_ENABLE=1
+      - FACE_BACKEND=rknn
+      - FACE_RKNN_MODEL=/app/models/RetinaFace_mobile320-rk3576.rknn
       - FACE_SCORE=0.6
       - FACE_MIN_SIZE=60
+      - AGE_GENDER_BACKEND=rknn
+      - AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn
       - HEADPOSE_ENABLE=1
-      - HEADPOSE_MODEL=/app/models/whenet.onnx
+      - HEADPOSE_BACKEND=rknn
+      - HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn
       - LOOK_YAW=25
       - LOOK_PITCH=20
       - FLIP_H=0

@@ -1,4 +1,4 @@
-"""YOLOv11 based Human vs Non-Human detector."""
+"""Human-only detector: YOLO 'person' class + RetinaFace, no non-human output."""
 import os
 import threading
 import time
@@ -39,18 +39,18 @@ class HumanDetector:
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
                  window_sec: float = 1.0, face_enable: bool = True,
                  headpose_enable: bool = True, face_min_size: int = 60):
-        from ultralytics import YOLO
-
         self.conf = conf
         self.imgsz = imgsz
         self.model_name = model_name
         self.face_min_size = int(face_min_size)
-        # ---- NPU backend: YOLO_BACKEND=auto|cpu|rknn ----
-        # auto = RKNN_MODEL file + rknnlite thakle NPU, naile CPU fallback.
-        # .rknn akhono na banale safe CPU te cholbe, crash korbe na.
-        self.backend = os.getenv("YOLO_BACKEND", "auto").lower()
+        # NPU-only: CPU/auto/ONNX fallback removed. Missing RKNN => fail fast.
+        self.backend = os.getenv("YOLO_BACKEND", "rknn").lower()
+        if self.backend not in ("rknn", ""):
+            raise RuntimeError(
+                f"YOLO_BACKEND={self.backend!r} is disabled in NPU-only mode")
+        self.backend = "rknn"
         self.rknn_path = os.getenv("RKNN_MODEL", "/app/models/yolo11n-rk3576.rknn")
-        self.rknn = None
+        self.model = None
         # NPU device log: /dev/rknpu (NPU) + /dev/dri/renderD129 (Mali GPU)
         try:
             from .accel import hw_summary
@@ -58,59 +58,26 @@ class HumanDetector:
                   f"exists={os.path.exists(self.rknn_path)}")
         except Exception:
             pass
-        if self.backend in ("auto", "rknn") and os.path.exists(self.rknn_path):
-            try:
-                from rknnlite.api import RKNNLite
-                core = os.getenv("RKNPU_CORE", "AUTO")
-                self.rknn = RKNNLite()
-                # NPU core: AUTO default; RK3576 te 0/1/2 force kora jay
-                load_kw = {}
-                if core.upper() not in ("AUTO", ""):
-                    try:
-                        load_kw["core_mask"] = int(core)
-                    except ValueError:
-                        pass
-                ret = self.rknn.load_rknn(self.rknn_path)
-                if ret != 0:
-                    raise RuntimeError(f"load_rknn ret={ret}")
-                ret = self.rknn.init_runtime(**load_kw) if load_kw else self.rknn.init_runtime()
-                if ret != 0:
-                    raise RuntimeError(f"init_runtime ret={ret}")
-                try:
-                    from .accel import rknn_input_summary
-                    print(f"[yolo] NPU input: {rknn_input_summary(self.rknn)}")
-                except Exception:
-                    pass
-                print(f"[yolo] NPU backend active: {self.rknn_path} core={core}")
-            except Exception as e:
-                print(f"[yolo] NPU init fail, CPU fallback: {e}")
-                self.rknn = None
-        elif self.backend in ("auto", "rknn"):
-            print(f"[yolo] RKNN model missing, CPU fallback: {self.rknn_path}")
-        if self.rknn is not None:
-            self.backend = "rknn"
-            self.model = None
-            self.names = {i: n for i, n in enumerate(
-                ["person", "bicycle", "car", "motorcycle", "airplane", "bus",
-                 "train", "truck", "boat", "traffic light", "fire hydrant",
-                 "stop sign", "parking meter", "bench", "bird", "cat", "dog",
-                 "horse", "sheep", "cow", "elephant", "bear", "zebra",
-                 "giraffe", "backpack", "umbrella", "handbag", "tie",
-                 "suitcase", "frisbee", "skis", "snowboard", "sports ball",
-                 "kite", "baseball bat", "baseball glove", "skateboard",
-                 "surfboard", "tennis racket", "bottle", "wine glass", "cup",
-                 "fork", "knife", "spoon", "bowl", "banana", "apple",
-                 "sandwich", "orange", "broccoli", "carrot", "hot dog",
-                 "pizza", "donut", "cake", "chair", "couch", "potted plant",
-                 "bed", "dining table", "toilet", "tv", "laptop", "mouse",
-                 "remote", "keyboard", "cell phone", "microwave", "oven",
-                 "toaster", "sink", "refrigerator", "book", "clock", "vase",
-                 "scissors", "teddy bear", "hair drier", "toothbrush"])}
-        else:
-            self.backend = "cpu"
-            # lazy download on first run; Docker build e cache kora jabe
-            self.model = YOLO(model_name)
-            self.names = self.model.names  # {0: 'person', ...}
+        from .accel import rknn_input_summary, rknn_load
+        self.rknn, core = rknn_load(self.rknn_path, "yolo")
+        print(f"[yolo] NPU input: {rknn_input_summary(self.rknn)}")
+        print(f"[yolo] NPU backend active: {self.rknn_path} core={core}")
+        self.names = {i: n for i, n in enumerate(
+            ["person", "bicycle", "car", "motorcycle", "airplane", "bus",
+             "train", "truck", "boat", "traffic light", "fire hydrant",
+             "stop sign", "parking meter", "bench", "bird", "cat", "dog",
+             "horse", "sheep", "cow", "elephant", "bear", "zebra",
+             "giraffe", "backpack", "umbrella", "handbag", "tie",
+             "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+             "kite", "baseball bat", "baseball glove", "skateboard",
+             "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+             "fork", "knife", "spoon", "bowl", "banana", "apple",
+             "sandwich", "orange", "broccoli", "carrot", "hot dog",
+             "pizza", "donut", "cake", "chair", "couch", "potted plant",
+             "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+             "remote", "keyboard", "cell phone", "microwave", "oven",
+             "toaster", "sink", "refrigerator", "book", "clock", "vase",
+             "scissors", "teddy bear", "hair drier", "toothbrush"])}
         self._lock = threading.Lock()
         self.last_counts = {"human": 0, "non_human": 0, "face": 0,
                             "male": 0, "female": 0, "fps": 0.0}
@@ -129,11 +96,12 @@ class HumanDetector:
         # DETECT_EVERY=2 mane 2 bar er moddhe 1 bar YOLO, majhe box reuse.
         # RK3576 CPU te ~2x infer fps bare.
         self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
-        self.max_faces = max(1, int(os.getenv("MAX_FACES", "3")))
+        # 0 = no cap. Frame-e joto face thakbe sob process korbo.
+        self.max_faces = max(0, int(os.getenv("MAX_FACES", "0")))
         # False-positive guard: a 'person' box must clear its own threshold.
         # Objects misread as person usually sit between 0.5 and 0.65.
         self.person_conf = float(os.getenv("PERSON_CONF", "0.65"))
-        self.person_min_h = int(os.getenv("PERSON_MIN_H", "40"))
+        self.person_min_h = int(os.getenv("PERSON_MIN_H", "0"))
         self.person_require_face = os.getenv("PERSON_REQUIRE_FACE", "0") == "1"
         # Never reuse a stale box longer than this (seconds).
         self.det_stale_sec = float(os.getenv("DET_STALE_SEC", "0.2"))
@@ -191,15 +159,9 @@ class HumanDetector:
                 time.sleep(0.2)
 
     def _run_yolo(self, frame: np.ndarray):
-        if self.rknn is not None:
-            return self._run_rknn(frame)
-        with self._lock:
-            results = self.model.predict(
-                source=frame, conf=self.conf, imgsz=self.imgsz,
-                verbose=False, half=False, augment=False,
-                agnostic_nms=True, max_det=20,
-            )[0]
-        return results
+        if self.rknn is None:
+            raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
+        return self._run_rknn(frame)
 
     # ---------- RK3576 NPU (RKNNLite) path ----------
     @staticmethod
@@ -222,13 +184,12 @@ class HumanDetector:
         H, W = frame.shape[:2]
         img, ratio, pad_x, pad_y = self._letterbox(frame, self.imgsz)
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(_np.float32) / 255.0
-        # Model er compiled input NHWC/FLOAT16; amra pathai NCHW float32.
-        # data_format na dile Lite2 default NHWC dhoro → image ulto-pulte
-        # podhe → class score garbage → sob kichu 'person' hoy.
-        nchw = _np.ascontiguousarray(
-            _np.transpose(rgb, (2, 0, 1))[_np.newaxis, ...])
+        # Model er compiled input NHWC/FLOAT16. Ekhon 4D NHWC pathai — age
+        # NCHW pathailo Lite2 image-ke ulto-pulte podhe, class score garbage
+        # hoto ar sob kichu 'person' dekha jeto.
+        nhwc = _np.ascontiguousarray(rgb[_np.newaxis, ...], dtype=_np.float32)
         with self._lock:
-            outs = rknn_infer(self.rknn, nchw, "nchw", "float32")
+            outs = rknn_infer(self.rknn, nhwc, "nhwc", "float32")
         if not outs:
             if not getattr(self, "_rknn_warned", False):
                 print("[yolo] NPU returned no outputs (inference fail)")
@@ -255,20 +216,17 @@ class HumanDetector:
         # Ultralytics YOLO11 export already applies sigmoid to class scores.
         # Applying it again would inflate every confidence to >= 0.5.
         scores = pred[:, 4:]
-        cls_ids = _np.argmax(scores, axis=1)
-        confs = scores[_np.arange(len(scores)), cls_ids]
+        # Strict human-only: COCO class 0 = 'person'. Other class-er score
+        # dekheo detect korbo na, label-o dekhabo na.
+        person_scores = scores[:, 0]
         if self._debug and not getattr(self, "_rknn_debug_done", False):
             self._rknn_debug_done = True
-            best = pred[int(_np.argmax(confs))]
-            order = _np.argsort(best[4:])[-5:][::-1]
-            print("[yolo-debug] top classes: " + ", ".join(
-                f"{self.names.get(int(i), i)}={float(best[4 + int(i)]):.3f}"
-                for i in order))
-        # Person-get alada (beshi) threshold — object-ke human bananor mota
-        # 0.5-0.65 score gulo etay ukriye jay.
-        needed = _np.where(cls_ids == 0, self.person_conf, self.conf)
-        keep = confs >= needed
-        boxes_cxcywh, cls_ids, confs = boxes_cxcywh[keep], cls_ids[keep], confs[keep]
+            print(f"[yolo-debug] max person score="
+                  f"{float(person_scores.max()) if len(person_scores) else 0.0:.3f}")
+        keep = person_scores >= self.person_conf
+        boxes_cxcywh = boxes_cxcywh[keep]
+        confs = person_scores[keep]
+        cls_ids = _np.zeros(len(confs), dtype=_np.int64)
         if len(confs) == 0:
             return _RknnResult([])
         # letterbox undo -> original frame coords
@@ -293,12 +251,13 @@ class HumanDetector:
             try:
                 picked = cv2.dnn.NMSBoxes(
                     [nms_boxes[i] for i in ix], confs[ix].tolist(),
-                    self.conf, 0.45, top_k=10)
+                    self.conf, 0.45)
                 picked = [int(x) for x in _np.asarray(picked).reshape(-1)]
             except Exception:
                 picked = list(range(len(ix)))
             kept.update(int(ix[p]) for p in picked)
-        kept = sorted(kept, key=lambda i: -float(confs[i]))[:20]
+        # Kono count cap nai — frame-e joto object thakbe sob return korbo.
+        kept = sorted(kept, key=lambda i: -float(confs[i]))
         out = [_RknnBox(int(cls_ids[i]), float(confs[i]),
                         [int(ltrb[i][0]), int(ltrb[i][1]),
                          int(ltrb[i][2]), int(ltrb[i][3])])
@@ -327,12 +286,12 @@ class HumanDetector:
         detections: List[Dict] = []
 
         def _keep(d: Dict) -> bool:
-            """Person-get alada threshold + choto box filter (duto backend-e)."""
+            """Strict human-only: non-human kisui passe na."""
+            if d["kind"] != "human":
+                return False
             x1, y1, x2, y2 = d["box"]
-            if d["kind"] == "human":
-                if d["conf"] < self.person_conf or (y2 - y1) < self.person_min_h:
-                    return False
-            return d["conf"] >= self.conf
+            return (d["conf"] >= self.person_conf and
+                    (y2 - y1) >= self.person_min_h)
 
         if run_yolo:
             _t0 = time.perf_counter()
@@ -341,12 +300,12 @@ class HumanDetector:
                 (time.perf_counter() - _t0) * 1000, 1)
             for box in results.boxes:
                 cls_id = int(box.cls[0])
+                if cls_id != 0:
+                    continue  # strictly human-only
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
-                coco_name = self.names.get(cls_id, str(cls_id))
-                d = {"kind": "human" if cls_id == 0 else "non_human",
-                     "class": coco_name, "conf": round(conf, 3),
-                     "box": [x1, y1, x2, y2]}
+                d = {"kind": "human", "class": "person",
+                     "conf": round(conf, 3), "box": [x1, y1, x2, y2]}
                 if _keep(d):
                     detections.append(d)
             self._last_dets = [dict(d) for d in detections]
@@ -368,8 +327,8 @@ class HumanDetector:
                     faces = self.face.detect(source_frame)
                     self.timing["face_ms"] = round(
                         (time.perf_counter() - _t0) * 1000, 1)
-                    # Limit small distant faces to keep camera inference bounded.
-                    if len(faces) > self.max_faces:
+                    # MAX_FACES=0 (default) means no cap; >0 only if explicitly set.
+                    if self.max_faces > 0 and len(faces) > self.max_faces:
                         faces = sorted(
                             faces,
                             key=lambda f: -((f["box"][2] - f["box"][0]) *
@@ -411,17 +370,16 @@ class HumanDetector:
                 self._last_dets = [dict(d) for d in detections]
 
         human_n = sum(1 for d in detections if d["kind"] == "human")
-        non_human_n = sum(1 for d in detections if d["kind"] == "non_human")
+        # Non-human detect/label — duto-i choles na.
+        non_human_n = 0
 
         # Boxes draw kora hoy face/check-er por, jate bade dewa box dekha na jay.
         for d in detections:
+            if d["kind"] != "human":
+                continue
             x1, y1, x2, y2 = d["box"]
-            if d["kind"] == "human":
-                label = f"Human {d['conf']:.2f}"
-                color = (0, 255, 0)  # green
-            else:
-                label = f"Non-Human:{d['class']} {d['conf']:.2f}"
-                color = (0, 165, 255)  # orange
+            label = f"Human {d['conf']:.2f}"
+            color = (0, 255, 0)  # green
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)

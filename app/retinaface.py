@@ -82,50 +82,15 @@ class RetinaFace:
         self.net = None
         self.backend_used = "off"
 
-        if self.backend_want in ("rknn", "auto") and os.path.isfile(self.rknn_path):
-            try:
-                from rknnlite.api import RKNNLite
-
-                self.rknn = RKNNLite()
-                ret = self.rknn.load_rknn(self.rknn_path)
-                if ret != 0:
-                    raise RuntimeError(f"load_rknn ret={ret}")
-                core = os.getenv("RKNPU_CORE", "AUTO")
-                load_kw = {}
-                if core.upper() not in ("AUTO", ""):
-                    try:
-                        load_kw["core_mask"] = int(core)
-                    except ValueError:
-                        pass
-                ret = self.rknn.init_runtime(**load_kw) if load_kw else self.rknn.init_runtime()
-                if ret != 0:
-                    raise RuntimeError(f"init_runtime ret={ret}")
-                self.backend_used = "rknn"
-                print(f"[face] RetinaFace RKNN NPU active: {self.rknn_path}")
-                return
-            except Exception as e:
-                print(f"[face] RetinaFace RKNN init failed; trying ONNX CPU: {e}")
-                if self.rknn is not None:
-                    try:
-                        self.rknn.release()
-                    except Exception:
-                        pass
-                self.rknn = None
-        elif self.backend_want in ("rknn", "auto"):
-            print(f"[face] RetinaFace RKNN missing: {self.rknn_path}; trying ONNX CPU")
-
         if self.backend_want == "off":
             return
-        if not os.path.isfile(self.onnx_path):
-            print(f"[face] RetinaFace ONNX missing: {self.onnx_path}")
-            return
-        try:
-            self.net = cv2.dnn.readNetFromONNX(self.onnx_path)
-            self.output_names = self.net.getUnconnectedOutLayersNames()
-            self.backend_used = "opencv-cpu"
-            print(f"[face] RetinaFace ONNX CPU active: {self.onnx_path}")
-        except Exception as e:
-            print(f"[face] RetinaFace ONNX load failed: {e}")
+        if self.backend_want not in ("rknn", ""):
+            raise RuntimeError(
+                f"FACE_BACKEND={self.backend_want!r} is disabled in NPU-only mode")
+        from .accel import rknn_load
+        self.rknn, core = rknn_load(self.rknn_path, "face")
+        self.backend_used = "rknn"
+        print(f"[face] RetinaFace RKNN NPU active: {self.rknn_path} core={core}")
 
     @property
     def loaded(self) -> bool:
@@ -148,13 +113,15 @@ class RetinaFace:
         h, w = frame.shape[:2]
         letterboxed, ratio, pad_x, pad_y = self._letterbox(frame)
         rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
+        # RKNN needs an explicit batch: (1, 320, 320, 3), not a bare HWC array.
+        rknn_blob = np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.uint8)
         try:
             if self.rknn is not None:
                 try:
                     from .accel import rknn_infer
-                    outputs = rknn_infer(self.rknn, rgb, "nhwc", "uint8")
+                    outputs = rknn_infer(self.rknn, rknn_blob, "nhwc", "uint8")
                 except ImportError:
-                    outputs = self.rknn.inference(inputs=[rgb])
+                    outputs = self.rknn.inference(inputs=[rknn_blob])
                 if not outputs:
                     raise RuntimeError("RKNN returned no outputs")
             else:
@@ -186,9 +153,10 @@ class RetinaFace:
             lm[:, :, 0] = np.clip((lm[:, :, 0] - pad_x) / ratio, 0, w - 1)
             lm[:, :, 1] = np.clip((lm[:, :, 1] - pad_y) / ratio, 0, h - 1)
 
-            order = scores.argsort()[::-1][:1000]
+            # Kono count cap nai — joto face score pass korbe sob NMS-e jay.
+            order = scores.argsort()[::-1]
             boxes, scores, lm = boxes[order], scores[order], lm[order]
-            keep = _nms(boxes, scores, 0.5)[:100]
+            keep = _nms(boxes, scores, 0.5)
             return [{
                 "box": [int(round(v)) for v in boxes[i]],
                 "conf": round(float(scores[i]), 3),

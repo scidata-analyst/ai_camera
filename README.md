@@ -42,7 +42,7 @@ This creates:
 - `models/RetinaFace_mobile320-rk3576.rknn`
 - `models/genderage-rk3576.rknn`
 
-The app prefers those RKNN files and falls back to the matching ONNX model on CPU if an RKNN file or runtime is unavailable. Compose only mounts `models/`; it does not start conversion.
+The app is **NPU-only**: YOLO, RetinaFace, GenderAge and WHENet all run through RKNNLite. CPU/ONNX fallbacks were removed — a missing or failed RKNN model makes startup fail with a clear error instead of silently using CPU. Compose only mounts `models/`; it does not start conversion.
 
 For commercial deployment, check the pretrained model licenses first: InsightFace states its pretrained models are for non-commercial research use. See the [InsightFace model zoo](https://github.com/deepinsight/insightface/blob/master/model_zoo/README.md) and the [RKNN Model Zoo RetinaFace example](https://github.com/airockchip/rknn_model_zoo/tree/main/examples/RetinaFace).
 
@@ -50,24 +50,27 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `YOLO_BACKEND` | `rknn` | YOLO inference: RKNN, with CPU fallback |
+| `YOLO_BACKEND` | `rknn` | YOLO inference on NPU only; `cpu`/`auto` rejected |
 | `IMG_SIZE` | `320` | YOLO input size |
-| `FACE_BACKEND` | `rknn` | RetinaFace inference: RKNN, with ONNX CPU fallback |
-| `FACE_MODEL` | `/app/models/RetinaFace_mobile320.onnx` | RetinaFace ONNX model |
+| `FACE_BACKEND` | `rknn` | RetinaFace on NPU only; `off` disables face stage |
+| `FACE_MODEL` | `/app/models/RetinaFace_mobile320.onnx` | Legacy path (unused in NPU-only mode) |
 | `FACE_RKNN_MODEL` | `/app/models/RetinaFace_mobile320-rk3576.rknn` | RetinaFace RKNN model |
-| `AGE_GENDER_BACKEND` | `rknn` | GenderAge inference: RKNN, with ONNX CPU fallback |
-| `AGE_GENDER_MODEL` | `/app/models/genderage.onnx` | GenderAge ONNX model |
+| `AGE_GENDER_BACKEND` | `rknn` | GenderAge on NPU only; `off` disables it |
+| `AGE_GENDER_MODEL` | `/app/models/genderage.onnx` | Legacy path (unused in NPU-only mode) |
 | `AGE_GENDER_RKNN_MODEL` | `/app/models/genderage-rk3576.rknn` | GenderAge RKNN model |
-| `CONF_THRESHOLD` | `0.5` | Minimum score for non-person COCO classes |
+| `CONF_THRESHOLD` | `0.5` | NMS score floor for person boxes |
 | `PERSON_CONF` | `0.65` | Separate, higher score required for a `person` box (false "Human" fix) |
-| `PERSON_MIN_H` | `40` | Ignore person boxes shorter than this many pixels |
+| `PERSON_MIN_H` | `0` | Minimum person-box height in pixels; `0` = no size limit |
 | `PERSON_REQUIRE_FACE` | `0` | Set to `1` to accept a person box only when a face lies inside it |
 | `DET_STALE_SEC` | `0.2` | Max age of a reused box before YOLO is forced to re-run |
-| `YOLO_DEBUG` | `0` | Set to `1` to print the raw NPU top-class scores once at startup |
+| `YOLO_DEBUG` | `0` | Set to `1` to print the max NPU person score once at startup |
 | `FACE_SCORE` | `0.6` | Minimum RetinaFace confidence |
 | `FACE_MIN_SIZE` | `60` | Smaller face boxes show gender as `Unknown` |
 | `FACE_EVERY` | `1` | Run face detection every N inference frames |
-| `MAX_FACES` | `3` | Maximum faces to process per frame |
+| `MAX_FACES` | `0` | Per-frame face cap; `0` = unlimited (detect all) |
+| `HEADPOSE_ENABLE` | `1` | WHENet head-pose stage on NPU |
+| `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
+| `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
 GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age.
 
@@ -83,4 +86,4 @@ python tools/export_onnx_rknn.py --model models/whenet.onnx \
 
 ## Hardware
 
-The Compose service targets the RK3576 board, maps `/dev/dri/renderD129`, and mounts `./models:/app/models`. Check `/api/health` to confirm each backend is `rknn`; a missing conversion or runtime uses ONNX/CPU fallback where available.
+The Compose service targets the RK3576 board, maps `/dev/dri/renderD129`, and mounts `./models:/app/models`. Check `/api/health` to confirm each backend is `rknn`; a missing/failed RKNN model now fails startup instead of falling back to CPU.

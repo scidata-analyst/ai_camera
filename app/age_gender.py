@@ -24,48 +24,15 @@ class AgeGender:
         self.runs = 0
         self.last_ms = 0.0
 
-        if self.backend_want in ("rknn", "auto") and os.path.isfile(self.rknn_path):
-            try:
-                from rknnlite.api import RKNNLite
-
-                self.rknn = RKNNLite()
-                ret = self.rknn.load_rknn(self.rknn_path)
-                if ret != 0:
-                    raise RuntimeError(f"load_rknn ret={ret}")
-                core = os.getenv("RKNPU_CORE", "AUTO")
-                load_kw = {}
-                if core.upper() not in ("AUTO", ""):
-                    try:
-                        load_kw["core_mask"] = int(core)
-                    except ValueError:
-                        pass
-                ret = self.rknn.init_runtime(**load_kw) if load_kw else self.rknn.init_runtime()
-                if ret != 0:
-                    raise RuntimeError(f"init_runtime ret={ret}")
-                self.backend = "rknn"
-                print(f"[age-gender] RKNN NPU active: {self.rknn_path}")
-                return
-            except Exception as e:
-                print(f"[age-gender] RKNN init failed; trying ONNX CPU: {e}")
-                if self.rknn is not None:
-                    try:
-                        self.rknn.release()
-                    except Exception:
-                        pass
-                self.rknn = None
-        elif self.backend_want in ("rknn", "auto"):
-            print(f"[age-gender] RKNN model missing: {self.rknn_path}; trying ONNX CPU")
-
-        if self.backend_want == "off" or not os.path.isfile(self.onnx_path):
-            if self.backend_want != "off":
-                print(f"[age-gender] ONNX model missing: {self.onnx_path}")
+        if self.backend_want == "off":
             return
-        try:
-            self.net = cv2.dnn.readNetFromONNX(self.onnx_path)
-            self.backend = "opencv-cpu"
-            print(f"[age-gender] ONNX CPU active: {self.onnx_path}")
-        except Exception as e:
-            print(f"[age-gender] ONNX load failed: {e}")
+        if self.backend_want not in ("rknn", ""):
+            raise RuntimeError(
+                f"AGE_GENDER_BACKEND={self.backend_want!r} is disabled in NPU-only mode")
+        from .accel import rknn_load
+        self.rknn, core = rknn_load(self.rknn_path, "age-gender")
+        self.backend = "rknn"
+        print(f"[age-gender] RKNN NPU active: {self.rknn_path} core={core}")
 
     @property
     def loaded(self) -> bool:
@@ -104,11 +71,14 @@ class AgeGender:
         started = time.perf_counter()
         try:
             if self.rknn is not None:
+                # ONNX CPU needs NCHW; RK3576 model is compiled NHWC + batch 1.
+                nhwc = np.ascontiguousarray(
+                    np.transpose(blob[0], (1, 2, 3, 0)), dtype=np.float32)
                 try:
                     from .accel import rknn_infer
-                    outs = rknn_infer(self.rknn, blob, "nchw", "float32")
+                    outs = rknn_infer(self.rknn, nhwc, "nhwc", "float32")
                 except ImportError:
-                    outs = self.rknn.inference(inputs=[blob])
+                    outs = self.rknn.inference(inputs=[nhwc])
                 if not outs:
                     raise RuntimeError("RKNN returned no outputs")
                 raw = outs[0]
