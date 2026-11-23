@@ -95,3 +95,94 @@ class CountSmoother:
     @property
     def current(self):
         return self._cached
+
+
+def _most_common(values):
+    """Mode for any hashable values (gender string, age int, ...)."""
+    if not values:
+        return None
+    return collections.Counter(values).most_common(1)[0][0]
+
+
+class FaceAttributeSmoother:
+    """1-sec per-face age/gender mode smoother.
+
+    Frame-e joto face (ar human) dekha jay, sob prediction 1 sec window-e
+    joma kori. Box-IoU diye eki face-er track dhore, tar gender/age-er
+    most-common (mode) value label-e dekhai — flicker komay.
+    """
+
+    def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.35,
+                 max_tracks: int = 100):
+        self.window_sec = float(window_sec)
+        self.iou_thr = float(iou_thr)
+        self.max_tracks = int(max_tracks)
+        self.tracks: list = []  # {box, samples: deque[(t,gender,age,conf)]}
+
+    @staticmethod
+    def _iou(a, b) -> float:
+        x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+        x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        if inter <= 0:
+            return 0.0
+        area = ((a[2] - a[0]) * (a[3] - a[1]) +
+                (b[2] - b[0]) * (b[3] - b[1]))
+        return inter / max(area - inter, 1e-6)
+
+    def _match(self, box: list):
+        best, best_iou = None, 0.0
+        for track in self.tracks:
+            iou = self._iou(box, track["box"])
+            if iou > best_iou:
+                best, best_iou = track, iou
+        return best if best_iou >= self.iou_thr else None
+
+    def _prune(self, now: float):
+        cutoff = now - self.window_sec
+        for track in self.tracks:
+            while track["samples"] and track["samples"][0][0] < cutoff:
+                track["samples"].popleft()
+        self.tracks = [t for t in self.tracks if t["samples"]][-self.max_tracks:]
+
+    def add(self, faces):
+        """Store instant predictions. Only call when a fresh face infer ran."""
+        now = time.time()
+        for face in faces:
+            gender = face.get("gender")
+            age = face.get("age")
+            if gender in (None, "", "Unknown") or age in (None, 0):
+                continue
+            box = [int(v) for v in face["box"]]
+            track = self._match(box)
+            if track is None:
+                track = {"box": box, "samples": collections.deque()}
+                self.tracks.append(track)
+            track["box"] = box
+            track["samples"].append(
+                (now, str(gender), int(age), float(face.get("gconf", 0.0))))
+        self._prune(now)
+
+    def fill(self, faces):
+        """Overwrite each face with the 1-sec mode of gender and age."""
+        now = time.time()
+        self._prune(now)
+        for face in faces:
+            track = self._match([int(v) for v in face["box"]])
+            if track is None or not track["samples"]:
+                continue
+            samples = track["samples"]
+            genders = [s[1] for s in samples]
+            ages = [s[2] for s in samples]
+            gender = _most_common(genders)
+            age = _most_common(ages)
+            confs = [s[3] for s in samples if s[1] == gender]
+            face.update({
+                "gender": gender,
+                "age": int(age),
+                "gconf": round(sum(confs) / max(len(confs), 1), 3),
+                "age_mode_samples": collections.Counter(ages)[age],
+                "gender_mode_samples": collections.Counter(genders)[gender],
+                "attr_samples": len(samples),
+            })
+        return faces

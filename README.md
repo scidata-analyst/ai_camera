@@ -72,7 +72,7 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age.
+GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels use a 1-second mode (most-common value) over every detected human frame, so they stay stable instead of flickering.
 
 ## Existing exporters
 

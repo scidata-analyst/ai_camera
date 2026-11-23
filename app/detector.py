@@ -14,7 +14,7 @@ try:
 except Exception:
     pass
 
-from .smoother import CountSmoother
+from .smoother import CountSmoother, FaceAttributeSmoother
 from .retinaface import RetinaFace
 from .age_gender import AgeGender
 from .headpose import HeadPoseEstimator
@@ -90,6 +90,8 @@ class HumanDetector:
         self.headpose_enabled = self.headpose is not None and self.headpose.loaded
         self.smoother = CountSmoother(window_sec=window_sec)
         self.smoothed = self.smoother.current
+        # 1-sec window-e sob face-er age/gender prediction joma kore mode dey.
+        self.attr_smoother = FaceAttributeSmoother(window_sec=window_sec)
         self._t_prev = time.time()
         self._fps_smooth = 0.0
         # LAG FIX: YOLO proti frame e na chaliye reuse koro.
@@ -345,12 +347,16 @@ class HumanDetector:
                                 self.age_gender.predict(source_frame, face)
                     self.timing["age_gender_ms"] = round(
                         (time.perf_counter() - _t1) * 1000, 1)
+                    # 1-sec window-e sob fresh prediction joma koro.
+                    self.attr_smoother.add(faces)
                     if self.headpose is not None:
                         faces = self.headpose.fill_from_cache(faces)
                         self._headpose_submit(source_frame, faces)
                     self._last_faces_cache = [dict(f) for f in faces]
                 else:
                     faces = [dict(f) for f in self._last_faces_cache]
+                # Mode (most common) age/gender over the 1-sec window.
+                self.attr_smoother.fill(faces)
                 RetinaFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")
@@ -373,12 +379,30 @@ class HumanDetector:
         # Non-human detect/label — duto-i choles na.
         non_human_n = 0
 
+        def _face_for_human(d: Dict):
+            """Human box-er moddhe thaka (mode-smoothed) face khujo."""
+            x1, y1, x2, y2 = d["box"]
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            best, best_area = None, None
+            for f in faces:
+                fx1, fy1, fx2, fy2 = f["box"]
+                if fx1 <= cx <= fx2 and fy1 <= cy <= fy2:
+                    area = (fx2 - fx1) * (fy2 - fy1)
+                    if best_area is None or area < best_area:
+                        best, best_area = f, area
+            return best
+
         # Boxes draw kora hoy face/check-er por, jate bade dewa box dekha na jay.
         for d in detections:
             if d["kind"] != "human":
                 continue
             x1, y1, x2, y2 = d["box"]
-            label = f"Human {d['conf']:.2f}"
+            face = _face_for_human(d)
+            if face is not None and face.get("gender") not in (None, "Unknown"):
+                label = (f"Human {face['gender']} {face['age']}y "
+                         f"{d['conf']:.2f}")
+            else:
+                label = f"Human {d['conf']:.2f}"
             color = (0, 255, 0)  # green
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
