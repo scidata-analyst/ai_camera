@@ -28,6 +28,12 @@ services:
       - RKNPU_CORE=AUTO
       - MODEL_NAME=/app/models/yolo11n.pt
       - CONF_THRESHOLD=0.5
+      # person class er jonno alada (kodo) threshold — object-ke human banano komay
+      - PERSON_CONF=0.65
+      - PERSON_MIN_H=40
+      - PERSON_REQUIRE_FACE=0
+      - DET_STALE_SEC=0.2
+      - YOLO_DEBUG=0
       - IMG_SIZE=320
       - FRAME_WIDTH=640
       - FRAME_HEIGHT=480

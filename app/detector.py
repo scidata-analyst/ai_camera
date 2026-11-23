@@ -76,6 +76,11 @@ class HumanDetector:
                 ret = self.rknn.init_runtime(**load_kw) if load_kw else self.rknn.init_runtime()
                 if ret != 0:
                     raise RuntimeError(f"init_runtime ret={ret}")
+                try:
+                    from .accel import rknn_input_summary
+                    print(f"[yolo] NPU input: {rknn_input_summary(self.rknn)}")
+                except Exception:
+                    pass
                 print(f"[yolo] NPU backend active: {self.rknn_path} core={core}")
             except Exception as e:
                 print(f"[yolo] NPU init fail, CPU fallback: {e}")
@@ -125,6 +130,15 @@ class HumanDetector:
         # RK3576 CPU te ~2x infer fps bare.
         self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
         self.max_faces = max(1, int(os.getenv("MAX_FACES", "3")))
+        # False-positive guard: a 'person' box must clear its own threshold.
+        # Objects misread as person usually sit between 0.5 and 0.65.
+        self.person_conf = float(os.getenv("PERSON_CONF", "0.65"))
+        self.person_min_h = int(os.getenv("PERSON_MIN_H", "40"))
+        self.person_require_face = os.getenv("PERSON_REQUIRE_FACE", "0") == "1"
+        # Never reuse a stale box longer than this (seconds).
+        self.det_stale_sec = float(os.getenv("DET_STALE_SEC", "0.2"))
+        self._last_dets_t = 0.0
+        self._debug = os.getenv("YOLO_DEBUG", "0") == "1"
         # SPEED: RetinaFace proti infer e na chaliye N bar por por (box reuse).
         # FACE_EVERY=2 mane YOLO skip er sathe face o half rate -> CPU ~30% save.
         self.face_every = max(1, int(os.getenv("FACE_EVERY", "2")))
@@ -202,14 +216,24 @@ class HumanDetector:
         return out, r, left, top
 
     def _run_rknn(self, frame: np.ndarray):
-        """NPU infer + Python NMS. Output shape auto-handle (84xN / Nx84)."""
+        """NPU infer + class-wise NMS. Output shape auto-handle (84xN / Nx84)."""
         import numpy as _np
+        from .accel import rknn_infer
         H, W = frame.shape[:2]
         img, ratio, pad_x, pad_y = self._letterbox(frame, self.imgsz)
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(_np.float32) / 255.0
-        nchw = _np.transpose(rgb, (2, 0, 1))[_np.newaxis, ...]
+        # Model er compiled input NHWC/FLOAT16; amra pathai NCHW float32.
+        # data_format na dile Lite2 default NHWC dhoro → image ulto-pulte
+        # podhe → class score garbage → sob kichu 'person' hoy.
+        nchw = _np.ascontiguousarray(
+            _np.transpose(rgb, (2, 0, 1))[_np.newaxis, ...])
         with self._lock:
-            outs = self.rknn.inference(inputs=[nchw])
+            outs = rknn_infer(self.rknn, nchw, "nchw", "float32")
+        if not outs:
+            if not getattr(self, "_rknn_warned", False):
+                print("[yolo] NPU returned no outputs (inference fail)")
+                self._rknn_warned = True
+            return _RknnResult([])
         pred = None
         for o in outs:
             o = _np.asarray(o)
@@ -233,9 +257,17 @@ class HumanDetector:
         scores = pred[:, 4:]
         cls_ids = _np.argmax(scores, axis=1)
         confs = scores[_np.arange(len(scores)), cls_ids]
-        keep = confs >= self.conf
-        # sudhu person (0) + non-human box — sob class NMS er age filter na,
-        # conf filter e enough; agnostic NMS er moto 1 bar NMS
+        if self._debug and not getattr(self, "_rknn_debug_done", False):
+            self._rknn_debug_done = True
+            best = pred[int(_np.argmax(confs))]
+            order = _np.argsort(best[4:])[-5:][::-1]
+            print("[yolo-debug] top classes: " + ", ".join(
+                f"{self.names.get(int(i), i)}={float(best[4 + int(i)]):.3f}"
+                for i in order))
+        # Person-get alada (beshi) threshold — object-ke human bananor mota
+        # 0.5-0.65 score gulo etay ukriye jay.
+        needed = _np.where(cls_ids == 0, self.person_conf, self.conf)
+        keep = confs >= needed
         boxes_cxcywh, cls_ids, confs = boxes_cxcywh[keep], cls_ids[keep], confs[keep]
         if len(confs) == 0:
             return _RknnResult([])
@@ -254,17 +286,23 @@ class HumanDetector:
              max(1, int(box[3] - box[1]))]
             for box in ltrb
         ]
-        try:
-            idxs = cv2.dnn.NMSBoxes(nms_boxes, confs.tolist(),
-                                    self.conf, 0.45, top_k=20)
-            idxs = set(int(i) for arr in _np.asarray(idxs).reshape(-1)
-                       for i in ([arr] if _np.ndim(arr) == 0 else arr))
-        except Exception:
-            idxs = set(range(len(confs)))
+        # Class-wise NMS: ek class-er box onno class-er box diye chapai jay na.
+        kept: set[int] = set()
+        for cid in _np.unique(cls_ids):
+            ix = _np.flatnonzero(cls_ids == cid)
+            try:
+                picked = cv2.dnn.NMSBoxes(
+                    [nms_boxes[i] for i in ix], confs[ix].tolist(),
+                    self.conf, 0.45, top_k=10)
+                picked = [int(x) for x in _np.asarray(picked).reshape(-1)]
+            except Exception:
+                picked = list(range(len(ix)))
+            kept.update(int(ix[p]) for p in picked)
+        kept = sorted(kept, key=lambda i: -float(confs[i]))[:20]
         out = [_RknnBox(int(cls_ids[i]), float(confs[i]),
                         [int(ltrb[i][0]), int(ltrb[i][1]),
                          int(ltrb[i][2]), int(ltrb[i][3])])
-               for i in sorted(idxs)[:20]]
+               for i in kept]
         return _RknnResult(out)
 
     def infer(self, frame: np.ndarray) -> tuple[np.ndarray, List[Dict]]:
@@ -280,10 +318,21 @@ class HumanDetector:
         # eki frame e porle spike hoto. (==0 phase, EVERY=1 eo thik chole;
         # ager ==1 logic e EVERY=1 dile kokhono re-run hoto na.)
         run_yolo = (self._frame_no % self.detect_every == 0) or not self._last_dets
+        # Purono box beshi din reuse korle camera naoleo 'human' dekha jay.
+        if not run_yolo and self._last_dets_t and \
+                time.time() - self._last_dets_t > self.det_stale_sec:
+            self._last_dets = []
+            run_yolo = True
 
         detections: List[Dict] = []
-        human_n = 0
-        non_human_n = 0
+
+        def _keep(d: Dict) -> bool:
+            """Person-get alada threshold + choto box filter (duto backend-e)."""
+            x1, y1, x2, y2 = d["box"]
+            if d["kind"] == "human":
+                if d["conf"] < self.person_conf or (y2 - y1) < self.person_min_h:
+                    return False
+            return d["conf"] >= self.conf
 
         if run_yolo:
             _t0 = time.perf_counter()
@@ -295,38 +344,15 @@ class HumanDetector:
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 coco_name = self.names.get(cls_id, str(cls_id))
-
-                if cls_id == 0:  # person
-                    kind = "human"
-                    human_n += 1
-                else:
-                    kind = "non_human"
-                    non_human_n += 1
-
-                detections.append(
-                    {"kind": kind, "class": coco_name, "conf": round(conf, 3),
+                d = {"kind": "human" if cls_id == 0 else "non_human",
+                     "class": coco_name, "conf": round(conf, 3),
                      "box": [x1, y1, x2, y2]}
-                )
+                if _keep(d):
+                    detections.append(d)
             self._last_dets = [dict(d) for d in detections]
+            self._last_dets_t = time.time()
         else:
-            detections = [dict(d) for d in self._last_dets]
-            human_n = sum(1 for d in detections if d["kind"] == "human")
-            non_human_n = sum(1 for d in detections if d["kind"] == "non_human")
-
-        for d in detections:
-            x1, y1, x2, y2 = d["box"]
-            if d["kind"] == "human":
-                label = f"Human {d['conf']:.2f}"
-                color = (0, 255, 0)  # green
-            else:
-                label = f"Non-Human:{d['class']} {d['conf']:.2f}"
-                color = (0, 165, 255)  # orange
-
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
-            cv2.putText(frame, label, (x1, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            detections = [dict(d) for d in self._last_dets if _keep(d)]
 
         # RetinaFace finds faces; the small age/gender head predicts inline.
         # FACE_EVERY controls whether the previous face results are reused.
@@ -370,6 +396,38 @@ class HumanDetector:
             except Exception as e:
                 print(f"[face] infer fail: {e}")
                 faces = []
+
+        # Optional cross-check: PERSON_REQUIRE_FACE=1 mantre face na thaka
+        # 'human' box gulo bade dewa hoy (chairs/bags ke human bananor roodh).
+        if self.person_require_face:
+            def _has_face(d: Dict) -> bool:
+                x1, y1, x2, y2 = d["box"]
+                return any(x1 <= f["box"][0] <= x2 and y1 <= f["box"][1] <= y2
+                           for f in faces)
+            before = len(detections)
+            detections = [d for d in detections
+                          if d["kind"] != "human" or _has_face(d)]
+            if len(detections) != before:
+                self._last_dets = [dict(d) for d in detections]
+
+        human_n = sum(1 for d in detections if d["kind"] == "human")
+        non_human_n = sum(1 for d in detections if d["kind"] == "non_human")
+
+        # Boxes draw kora hoy face/check-er por, jate bade dewa box dekha na jay.
+        for d in detections:
+            x1, y1, x2, y2 = d["box"]
+            if d["kind"] == "human":
+                label = f"Human {d['conf']:.2f}"
+                color = (0, 255, 0)  # green
+            else:
+                label = f"Non-Human:{d['class']} {d['conf']:.2f}"
+                color = (0, 165, 255)  # orange
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
+            cv2.putText(frame, label, (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
         face_n = len(faces)
         male_n = sum(1 for f in faces if f.get("gender") == "Male")
         female_n = sum(1 for f in faces if f.get("gender") == "Female")

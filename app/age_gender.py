@@ -104,7 +104,14 @@ class AgeGender:
         started = time.perf_counter()
         try:
             if self.rknn is not None:
-                raw = self.rknn.inference(inputs=[blob])[0]
+                try:
+                    from .accel import rknn_infer
+                    outs = rknn_infer(self.rknn, blob, "nchw", "float32")
+                except ImportError:
+                    outs = self.rknn.inference(inputs=[blob])
+                if not outs:
+                    raise RuntimeError("RKNN returned no outputs")
+                raw = outs[0]
             else:
                 self.net.setInput(blob)
                 raw = self.net.forward()

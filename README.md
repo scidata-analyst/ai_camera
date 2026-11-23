@@ -58,6 +58,12 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `AGE_GENDER_BACKEND` | `rknn` | GenderAge inference: RKNN, with ONNX CPU fallback |
 | `AGE_GENDER_MODEL` | `/app/models/genderage.onnx` | GenderAge ONNX model |
 | `AGE_GENDER_RKNN_MODEL` | `/app/models/genderage-rk3576.rknn` | GenderAge RKNN model |
+| `CONF_THRESHOLD` | `0.5` | Minimum score for non-person COCO classes |
+| `PERSON_CONF` | `0.65` | Separate, higher score required for a `person` box (false "Human" fix) |
+| `PERSON_MIN_H` | `40` | Ignore person boxes shorter than this many pixels |
+| `PERSON_REQUIRE_FACE` | `0` | Set to `1` to accept a person box only when a face lies inside it |
+| `DET_STALE_SEC` | `0.2` | Max age of a reused box before YOLO is forced to re-run |
+| `YOLO_DEBUG` | `0` | Set to `1` to print the raw NPU top-class scores once at startup |
 | `FACE_SCORE` | `0.6` | Minimum RetinaFace confidence |
 | `FACE_MIN_SIZE` | `60` | Smaller face boxes show gender as `Unknown` |
 | `FACE_EVERY` | `1` | Run face detection every N inference frames |

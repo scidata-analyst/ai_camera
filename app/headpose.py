@@ -126,8 +126,14 @@ class HeadPoseEstimator:
             # WHENet RKNN has static batch=1; submit one face per NPU call.
             rows = []
             for sample in batch:
-                outputs = self.rknn.inference(inputs=[
-                    np.ascontiguousarray(sample[None, ...], dtype=np.float32)])
+                blob = np.ascontiguousarray(sample[None, ...], dtype=np.float32)
+                try:
+                    from .accel import rknn_infer
+                    outputs = rknn_infer(self.rknn, blob, "nchw", "float32")
+                except ImportError:
+                    outputs = self.rknn.inference(inputs=[blob])
+                if not outputs:
+                    raise RuntimeError("RKNN returned no outputs")
                 rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
             return np.asarray(rows, dtype=np.float32)
         return self.session.run(None, {self.input_name: batch})[0]

@@ -7,6 +7,8 @@ health endpoint does not mistake every render node for a GPU.
 import glob
 import os
 
+import numpy as np
+
 RENDER_GLOB = "/dev/dri/renderD*"
 RKNPU_GLOB = "/dev/rknpu*"
 # user er deoa explicit path (compose e mount hoy)
@@ -52,6 +54,51 @@ def hw_summary() -> dict:
                         for driver in drivers.values()),
         "has_npu": bool(rknpu or npu_dri),
     }
+
+
+def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
+    """Run RKNNLite.inference with an explicit input layout.
+
+    Lite2 defaults data_format to NHWC when it is omitted. That silently
+    misreads an NCHW float blob as (N=1, H=3, W=H, C=W) and produces garbage
+    detections (typically everything becomes COCO 'person'). Always state the
+    real layout of the array we pass. Older runtimes reject the kwargs, so
+    fall back to the historical call in that case.
+    """
+    kw = {"inputs": [blob], "data_format": layout}
+    if dtype:
+        kw["data_type"] = dtype
+    try:
+        return rknn.inference(**kw)
+    except TypeError:
+        return rknn.inference(inputs=[blob])
+    except Exception as exc:
+        # Kono board-e runtime NCHW buffer accept na korle NHWC try koro.
+        if layout == "nchw" and blob.ndim == 4 and blob.shape[1] in (1, 3, 4):
+            hwc = np.ascontiguousarray(
+                np.transpose(blob[0], (1, 2, 3, 0))[np.newaxis, ...])
+            retry = {"inputs": [hwc], "data_format": "nhwc"}
+            if dtype:
+                retry["data_type"] = dtype
+            print(f"[rknn] NCHW inference failed ({exc}); retry NHWC")
+            return rknn.inference(**retry)
+        raise
+
+
+def rknn_input_summary(rknn) -> dict:
+    """Best-effort model input descriptor, used for startup diagnostics."""
+    try:
+        details = rknn.get_input_details()
+        if not details:
+            return {}
+        d = details[0]
+        return {
+            "shape": tuple(int(v) for v in d.get("shape", ())),
+            "dtype": str(d.get("dtype", "")),
+            "layout": str(d.get("layout", "")).lower(),
+        }
+    except Exception:
+        return {}
 
 
 def opencl_available() -> bool:

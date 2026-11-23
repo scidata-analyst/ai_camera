@@ -150,7 +150,13 @@ class RetinaFace:
         rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
         try:
             if self.rknn is not None:
-                outputs = self.rknn.inference(inputs=[rgb])
+                try:
+                    from .accel import rknn_infer
+                    outputs = rknn_infer(self.rknn, rgb, "nhwc", "uint8")
+                except ImportError:
+                    outputs = self.rknn.inference(inputs=[rgb])
+                if not outputs:
+                    raise RuntimeError("RKNN returned no outputs")
             else:
                 # RKNN conversion applies the same RGB mean subtraction.
                 blob = cv2.dnn.blobFromImage(
