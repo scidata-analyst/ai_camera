@@ -146,7 +146,7 @@ class YuNetFace:
             color = (0, 255, 0) if fc.get("looking") else (255, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             if fc.get("gender") and fc.get("gender") != "Unknown":
-                label = f"{fc['gender'][0]}{fc['gconf']:.2f} {fc.get('age', 0)}y"
+                label = f"{fc['gender']} {fc['gconf']:.2f} {fc.get('age', 0)}y"
             else:
                 label = f"Face {conf:.2f}"
             if fc.get("looking"):
