@@ -71,9 +71,9 @@ class AgeGender:
         started = time.perf_counter()
         try:
             if self.rknn is not None:
-                # ONNX CPU needs NCHW; RK3576 model is compiled NHWC + batch 1.
+                # blob already (1,3,96,96); reorder axes on the 4D array.
                 nhwc = np.ascontiguousarray(
-                    np.transpose(blob[0], (1, 2, 3, 0)), dtype=np.float32)
+                    np.transpose(blob, (0, 2, 3, 1)), dtype=np.float32)
                 try:
                     from .accel import rknn_infer
                     outs = rknn_infer(self.rknn, nhwc, "nhwc", "float32")

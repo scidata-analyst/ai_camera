@@ -68,13 +68,13 @@ class HeadPoseEstimator:
 
     def _infer(self, batch: np.ndarray) -> np.ndarray:
         if self.rknn is not None:
-            # WHENet RKNN has static batch=1; submit one face per NPU call.
+            # batch = (1,3,224,224); reorder on 4D, then submit one at a time.
+            nhwc = np.ascontiguousarray(
+                np.transpose(batch, (0, 2, 3, 1)), dtype=np.float32)
             rows = []
-            for sample in batch:
-                # sample = (3,224,224) NCHW; RKNN wants (1,224,224,3) NHWC.
-                blob = np.ascontiguousarray(
-                    np.transpose(sample, (1, 2, 3, 0))[np.newaxis, ...],
-                    dtype=np.float32)
+            for sample in nhwc:
+                # sample = (224,224,3); RKNN wants (1,224,224,3).
+                blob = sample[np.newaxis, ...]
                 try:
                     from .accel import rknn_infer
                     outputs = rknn_infer(self.rknn, blob, "nhwc", "float32")
