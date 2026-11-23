@@ -15,8 +15,8 @@ except Exception:
     pass
 
 from .smoother import CountSmoother
-from .face_detector import YuNetFace
-from .mivolo import MiVOLOAgeGender
+from .retinaface import RetinaFace
+from .age_gender import AgeGender
 from .headpose import HeadPoseEstimator
 
 
@@ -34,12 +34,11 @@ class _RknnResult:
 
 
 class HumanDetector:
-    """YOLO Human + YuNet Face + MiVOLO age/gender + WHENet looking."""
+    """YOLO humans/objects + RetinaFace + age/gender + WHENet head pose."""
 
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
                  window_sec: float = 1.0, face_enable: bool = True,
-                 mivolo_enable: bool = True, headpose_enable: bool = True,
-                 face_min_size: int = 60):
+                 headpose_enable: bool = True, face_min_size: int = 60):
         from ultralytics import YOLO
 
         self.conf = conf
@@ -111,10 +110,10 @@ class HumanDetector:
         self.last_counts = {"human": 0, "non_human": 0, "face": 0,
                             "male": 0, "female": 0, "fps": 0.0}
         self.last_faces = []
-        self.face = YuNetFace() if face_enable else None
+        self.face = RetinaFace() if face_enable else None
         self.face_enabled = self.face is not None and self.face.loaded
-        self.mivolo = MiVOLOAgeGender() if (mivolo_enable and self.face_enabled) else None
-        self.mivolo_enabled = self.mivolo is not None and self.mivolo.loaded
+        self.age_gender = AgeGender() if (face_enable and self.face_enabled) else None
+        self.age_gender_enabled = self.age_gender is not None and self.age_gender.loaded
         self.headpose = HeadPoseEstimator() if (headpose_enable and self.face_enabled) else None
         self.headpose_enabled = self.headpose is not None and self.headpose.loaded
         self.smoother = CountSmoother(window_sec=window_sec)
@@ -126,66 +125,51 @@ class HumanDetector:
         # RK3576 CPU te ~2x infer fps bare.
         self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
         self.max_faces = max(1, int(os.getenv("MAX_FACES", "3")))
-        # SPEED: YuNet proti infer e na chaliye N bar por por (box reuse).
+        # SPEED: RetinaFace proti infer e na chaliye N bar por por (box reuse).
         # FACE_EVERY=2 mane YOLO skip er sathe face o half rate -> CPU ~30% save.
         self.face_every = max(1, int(os.getenv("FACE_EVERY", "2")))
         self._face_no = 0
         self._last_faces_cache = []
-        # SPEED: MiVOLO (~1s/face CPU) + WHENet infer loop ke block korto —
-        # etai lag er main karon chilo. Ekhon bg thread e chole
-        # (latest-only, queue jome na), infer loop e sudhu cache-fill (<1ms),
-        # result porer frame e ase.
-        self._mv_lock = threading.Lock()
-        self._mv_pending = None
-        self._mv_last_submit = 0.0
-        # Diagnose: proti stage er ms /api/stats e jay — board e kothay
-        # slow seta andaz na kore dekha jay (yolo/face/fill/infer/bg).
+        # Age/gender is a tiny single-face model and runs alongside face detect.
+        # Head-pose remains on a latest-only worker so it cannot stall the stream.
+        self._hp_lock = threading.Lock()
+        self._hp_pending = None
+        # Diagnose stage latency through /api/stats.
         self._bg_last_ms = 0.0
-        self.timing = {"yolo_ms": 0.0, "face_ms": 0.0, "fill_ms": 0.0,
+        self.timing = {"yolo_ms": 0.0, "face_ms": 0.0, "age_gender_ms": 0.0,
                        "infer_ms": 0.0}
-        self._bg_alive = bool(getattr(self, "mivolo_enabled", False)
-                              or getattr(self, "headpose_enabled", False))
-        if self._bg_alive:
+        if self.headpose_enabled:
             threading.Thread(target=self._bg_loop, daemon=True).start()
         self._frame_no = 0
         self._last_dets: List[Dict] = []
 
-    def _mivolo_submit(self, frame: np.ndarray, faces, bodies):
-        """Bg worker er jonno latest job rakho (purono drop — queue jomte deo na)."""
-        if self.mivolo is None or not faces:
+    def _headpose_submit(self, frame: np.ndarray, faces):
+        """Keep only the newest head-pose job; stale frames are discarded."""
+        if self.headpose is None or not faces:
             return
-        fcs = [{"box": list(f["box"]), "looking": f.get("looking")}
+        fcs = [{"box": list(f["box"]), "landmarks": f.get("landmarks"),
+                "looking": f.get("looking")}
                for f in faces]
-        with self._mv_lock:
-            self._mv_pending = (frame.copy(), fcs,
-                                [list(b) for b in bodies],
-                                self.face_min_size)
-        self._mv_last_submit = time.time()
+        with self._hp_lock:
+            self._hp_pending = (frame.copy(), fcs)
 
     def _bg_loop(self):
-        """WHENet looking + MiVOLO age/gender refresh (latest job only)."""
+        """Run only WHENet head pose on the newest face set."""
         while True:
             try:
-                with self._mv_lock:
-                    job = self._mv_pending
-                    self._mv_pending = None
+                with self._hp_lock:
+                    job = self._hp_pending
+                    self._hp_pending = None
                 if job is None:
                     time.sleep(0.05)
                     continue
-                frame, fcs, bodies, min_side = job
+                frame, fcs = job
                 _bt0 = time.perf_counter()
-                if self.headpose is not None:
-                    try:
-                        fcs = self.headpose.predict_frame(frame, fcs)
-                        self.headpose.remember(fcs)
-                    except Exception as e:
-                        print(f"[headpose-bg] {e}")
-                if self.mivolo is not None:
-                    try:
-                        self.mivolo.predict_frame(frame, fcs, bodies,
-                                                  min_side=min_side)
-                    except Exception as e:
-                        print(f"[mivolo-bg] {e}")
+                try:
+                    fcs = self.headpose.predict_frame(frame, fcs)
+                    self.headpose.remember(fcs)
+                except Exception as e:
+                    print(f"[headpose-bg] {e}")
                 self._bg_last_ms = round(
                     (time.perf_counter() - _bt0) * 1000, 1)
             except Exception as e:
@@ -285,11 +269,14 @@ class HumanDetector:
 
     def infer(self, frame: np.ndarray) -> tuple[np.ndarray, List[Dict]]:
         """Run detection, draw boxes, return (annotated_frame, detections)."""
+        # Keep model inputs free of the boxes/labels drawn below. In particular,
+        # face alignment and age/gender inference are sensitive to overlays.
+        source_frame = frame.copy()
         self._frame_no += 1
         _t_all = time.perf_counter()
         # LAG FIX: proti N frame e 1 bar YOLO, majhe ager box reuse.
-        # Face/YuNet proti bar chole (sosta), YOLO skip holeo video atke na.
-        # Phase stagger: YOLO even frame e, YuNet odd frame e — vari 2 kaj
+        # Face/RetinaFace periodically runs while YOLO boxes are reused.
+        # Phase stagger: YOLO even frame e, face detector odd frame e — vari 2 kaj
         # eki frame e porle spike hoto. (==0 phase, EVERY=1 eo thik chole;
         # ager ==1 logic e EVERY=1 dile kokhono re-run hoto na.)
         run_yolo = (self._frame_no % self.detect_every == 0) or not self._last_dets
@@ -341,9 +328,8 @@ class HumanDetector:
             cv2.putText(frame, label, (x1, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-        # YuNet face -> cache-fill (WHENet looking + MiVOLO age/gender, <1ms).
-        # Heavy model bg thread e refresh hoy — infer loop kokhono block hoy na.
-        # SPEED: FACE_EVERY onujayi YuNet skip, majhe ager face reuse (0ms).
+        # RetinaFace finds faces; the small age/gender head predicts inline.
+        # FACE_EVERY controls whether the previous face results are reused.
         faces = []
         if self.face is not None:
             try:
@@ -353,45 +339,34 @@ class HumanDetector:
                     or not self._last_faces_cache
                 if run_face:
                     _t0 = time.perf_counter()
-                    faces = self.face.detect(frame)
+                    faces = self.face.detect(source_frame)
                     self.timing["face_ms"] = round(
                         (time.perf_counter() - _t0) * 1000, 1)
-                    # LAG FIX: sob face na — sobcheye boro MAX_FACES ta.
-                    # choto/durer face e WHENet+MiVOLO chalano CPU noshto.
+                    # Limit small distant faces to keep camera inference bounded.
                     if len(faces) > self.max_faces:
                         faces = sorted(
                             faces,
                             key=lambda f: -((f["box"][2] - f["box"][0]) *
                                             (f["box"][3] - f["box"][1])),
                         )[:self.max_faces]
-                    if self._bg_alive and faces:
-                        _t1 = time.perf_counter()
-                        if self.headpose is not None:
-                            faces = self.headpose.fill_from_cache(faces)
-                        bodies = [d["box"] for d in detections if d["kind"] == "human"]
-                        need = False
-                        if self.mivolo is not None:
-                            # instant cache-fill (<1ms, block na); refresh bg te
-                            faces = self.mivolo.fill_from_cache(
-                                faces, min_side=self.face_min_size)
-                            need = any(f.get("gender") in (None, "Unknown")
-                                       for f in faces)
-                        if self.headpose is not None:
-                            need = need or any("looking" not in f
-                                               for f in faces)
-                        interval = max(1.0, self.mivolo.refresh_sec
-                                       if self.mivolo is not None else 1.0)
-                        if need or (time.time() - self._mv_last_submit > interval):
-                            self._mivolo_submit(frame, faces, bodies)
-                        self.timing["fill_ms"] = round(
-                            (time.perf_counter() - _t1) * 1000, 1)
-                    elif self.headpose is not None and faces:
-                        # bg off thakle fallback: ager moto inline
-                        faces = self.headpose.predict_frame(frame, faces)
+                    _t1 = time.perf_counter()
+                    if self.age_gender is not None:
+                        for face in faces:
+                            x1, y1, x2, y2 = face["box"]
+                            if min(x2 - x1, y2 - y1) < self.face_min_size:
+                                face.update({"gender": "Unknown", "gconf": 0.0,
+                                             "age": 0})
+                            else:
+                                self.age_gender.predict(source_frame, face)
+                    self.timing["age_gender_ms"] = round(
+                        (time.perf_counter() - _t1) * 1000, 1)
+                    if self.headpose is not None:
+                        faces = self.headpose.fill_from_cache(faces)
+                        self._headpose_submit(source_frame, faces)
                     self._last_faces_cache = [dict(f) for f in faces]
                 else:
                     faces = [dict(f) for f in self._last_faces_cache]
-                YuNetFace.draw(frame, faces)
+                RetinaFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")
                 faces = []
@@ -434,9 +409,9 @@ class HumanDetector:
             "fps": round(self._fps_smooth, 1),
             "t_yolo_ms": self.timing["yolo_ms"],
             "t_face_ms": self.timing["face_ms"],
-            "t_fill_ms": self.timing["fill_ms"],
+            "t_age_gender_ms": self.timing["age_gender_ms"],
             "t_infer_ms": self.timing["infer_ms"],
             "t_bg_ms": self._bg_last_ms,
-            "bg_pending": self._mv_pending is not None,
+            "bg_pending": self._hp_pending is not None,
         }
         return frame, detections

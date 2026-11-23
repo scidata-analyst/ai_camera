@@ -18,7 +18,6 @@ JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))  # 70->60: encode fast + bandwidth
 STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
-MIVOLO_ENABLE = os.getenv("MIVOLO_ENABLE", "1") == "1"
 HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
 FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face e gender off
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
@@ -50,7 +49,6 @@ app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)")
 camera = CameraStream()
 detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
                          window_sec=WINDOW_SEC, face_enable=FACE_ENABLE,
-                         mivolo_enable=MIVOLO_ENABLE,
                          headpose_enable=HEADPOSE_ENABLE,
                          face_min_size=FACE_MIN_SIZE)
 camera.start()
@@ -118,7 +116,7 @@ a{color:#4fc3f7}
 button{margin:0 4px}
 </style></head>
 <body>
-<header>AI Camera - Human / Face / Gender (YOLOv11n + YuNet + MiVOLO)</header>
+<header>AI Camera - Human / Face / Age / Gender (YOLOv11n + RetinaFace)</header>
 <img id="vid" src="/video_feed" />
 <div class="bar"><span class="panel" id="s">loading stats... (1s update)</span></div>
 <div class="bar">
@@ -136,7 +134,8 @@ async function tick(){
     document.getElementById('s').innerHTML =
       `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
       `M:${s.stable_male} W:${s.stable_female} Look:${j.instant.looking} | ` +
-      `infer:${j.infer_fps}fps MiVOLO run:${j.mivolo.runs} hit:${j.mivolo.hits}`;
+      `infer:${j.infer_fps}fps age/gender:${j.age_gender.runs} ` +
+      `${j.age_gender.last_ms}ms`;
     document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
     document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';
   }catch(e){}
@@ -164,14 +163,14 @@ def index():
 def health():
     face_backend = getattr(getattr(detector, "face", None),
                            "backend_used", "off")
-    mivolo_backend = getattr(getattr(detector, "mivolo", None),
-                             "backend", "off")
+    age_gender = getattr(detector, "age_gender", None)
+    age_gender_backend = getattr(age_gender, "backend", "off")
     headpose_backend = getattr(getattr(detector, "headpose", None),
                                "backend", "off")
     model_backends = {
         "object_detection": getattr(detector, "backend", "cpu"),
         "face_detection": face_backend,
-        "age_gender": mivolo_backend,
+        "age_gender": age_gender_backend,
         "head_pose": headpose_backend,
     }
     return {"status": "ok", "camera_connected": camera.connected,
@@ -194,11 +193,11 @@ def health():
             "face_enabled": FACE_ENABLE,
             "face_loaded": detector.face_enabled,
             "face_min_size": FACE_MIN_SIZE,
-            "mivolo_enabled": MIVOLO_ENABLE,
-            "mivolo_loaded": detector.mivolo_enabled,
-            "mivolo_backend": mivolo_backend,
-            "mivolo_rknn_model": getattr(getattr(detector, "mivolo", None),
-                                          "rknn_path", None),
+            "age_gender_enabled": detector.age_gender is not None,
+            "age_gender_loaded": detector.age_gender_enabled,
+            "age_gender_backend": age_gender_backend,
+            "age_gender_model": getattr(age_gender, "onnx_path", None),
+            "age_gender_rknn_model": getattr(age_gender, "rknn_path", None),
             "headpose_enabled": HEADPOSE_ENABLE,
             "headpose_loaded": detector.headpose_enabled,
             "infer_fps": round(_infer_fps, 1)}
@@ -212,15 +211,14 @@ def faces():
 
 @app.get("/api/stats")
 def stats():
-    mv = detector.mivolo
+    ag = detector.age_gender
     return {"camera_connected": camera.connected,
             "instant": detector.last_counts,
             "smoothed": detector.smoothed,
             "flip": _flip,
             "infer_fps": round(_infer_fps, 1),
-            "mivolo": {"runs": mv.runs if mv else 0,
-                       "hits": mv.hits if mv else 0,
-                       "last_ms": mv.last_ms if mv else 0.0},
+            "age_gender": {"runs": ag.runs if ag else 0,
+                           "last_ms": ag.last_ms if ag else 0.0},
             "window_sec": WINDOW_SEC,
             "time": time.time()}
 

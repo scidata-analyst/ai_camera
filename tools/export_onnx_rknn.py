@@ -2,7 +2,6 @@
 
 Usage:
     python tools/export_onnx_rknn.py --model models/whenet.onnx
-    python tools/export_onnx_rknn.py --model models/yunet.onnx
 """
 from __future__ import annotations
 

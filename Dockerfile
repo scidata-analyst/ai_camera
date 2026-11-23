@@ -15,9 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STREAM_FPS=25 \
     DETECT_EVERY=2 \
     MAX_FACES=3 \
-    FACE_EVERY=2 \
+    FACE_EVERY=1 \
     FACE_BACKEND=rknn \
-    FACE_RKNN_MODEL=/app/models/yunet-rk3576.rknn \
+    FACE_MODEL=/app/models/RetinaFace_mobile320.onnx \
+    FACE_RKNN_MODEL=/app/models/RetinaFace_mobile320-rk3576.rknn \
+    AGE_GENDER_BACKEND=rknn \
+    AGE_GENDER_MODEL=/app/models/genderage.onnx \
+    AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn \
     HEADPOSE_PROVIDER=auto \
     HEADPOSE_BACKEND=rknn \
     HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn \
@@ -30,20 +34,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CAMERA_SOURCE=0 \
     FACE_ENABLE=1 \
     FACE_SCORE=0.6 \
-    FACE_MODEL=/app/models/yunet.onnx \
-    MIVOLO_ENABLE=1 \
-    MIVOLO_MODEL=/app/models/mivolo_v2 \
-    MIVOLO_BACKEND=rknn \
-    MIVOLO_RKNN_MODEL=/app/models/mivolo_v2_rk3576.rknn \
-    MIVOLO_REFRESH=3.0 \
-    MIVOLO_MAX_FACES=1 \
     HEADPOSE_ENABLE=1 \
     HEADPOSE_MODEL=/app/models/whenet.onnx \
     LOOK_YAW=25 \
-    LOOK_PITCH=20 \
-    HF_HOME=/app/models/huggingface \
-    HUGGINGFACE_HUB_CACHE=/app/models/huggingface \
-    TRANSFORMERS_CACHE=/app/models/huggingface
+    LOOK_PITCH=20
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 libgomp1 ca-certificates \
@@ -56,7 +50,6 @@ RUN pip install --upgrade pip "setuptools<81" wheel && \
     pip install --no-deps --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 torchvision==0.23.0 && \
     pip install --retries 5 --timeout 120 -r requirements.txt && \
     pip install --no-deps --retries 5 --timeout 120 ultralytics==8.3.253 && \
-    pip install --no-deps --no-build-isolation https://github.com/WildChlamydia/MiVOLO/archive/37475e3f8818b5f22448003feec3e64b01bfb188.tar.gz && \
     if [ "$(uname -m)" = "aarch64" ] || [ "$TARGETARCH" = "arm64" ]; then \
       pip install "rknn-toolkit-lite2==${RKNN_VERSION}" && \
       python -c "from urllib.request import urlretrieve; urlretrieve('https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v${RKNN_VERSION}/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so', '/usr/lib/librknnrt.so')"; \
@@ -67,7 +60,7 @@ RUN pip install --upgrade pip "setuptools<81" wheel && \
 
 COPY app/ ./app/
 
-RUN mkdir -p /app/models/huggingface && ls -lh /app/ || true
+RUN ls -lh /app/ || true
 
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
