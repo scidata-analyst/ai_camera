@@ -262,8 +262,16 @@ class HumanDetector:
         x2 = ((cx + bw / 2 - pad_x) / ratio).clip(0, W)
         y2 = ((cy + bh / 2 - pad_y) / ratio).clip(0, H)
         ltrb = _np.stack([x1, y1, x2, y2], axis=1).tolist()
+        # OpenCV NMSBoxes expects [x, y, width, height], while ltrb is
+        # [x1, y1, x2, y2]. Passing ltrb directly corrupts overlap tests.
+        nms_boxes = [
+            [int(box[0]), int(box[1]),
+             max(1, int(box[2] - box[0])),
+             max(1, int(box[3] - box[1]))]
+            for box in ltrb
+        ]
         try:
-            idxs = cv2.dnn.NMSBoxes(ltrb, confs.tolist(),
+            idxs = cv2.dnn.NMSBoxes(nms_boxes, confs.tolist(),
                                     self.conf, 0.45, top_k=20)
             idxs = set(int(i) for arr in _np.asarray(idxs).reshape(-1)
                        for i in ([arr] if _np.ndim(arr) == 0 else arr))
