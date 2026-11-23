@@ -31,7 +31,7 @@ services:
       - IMG_SIZE=320
       - FRAME_WIDTH=640
       - FRAME_HEIGHT=480
-      - JPEG_QUALITY=60
+      - JPEG_QUALITY=85
       - STREAM_FPS=25
       - SMOOTH_WINDOW=1.0
       - DETECT_EVERY=2
