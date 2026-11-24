@@ -53,7 +53,7 @@ def _build_runtime() -> SimpleNamespace:
     face_loaded = (face_detector is not None and
                    face_detector.describe().get("loaded", False))
     estimator = (RknnGenderAgeEstimator(settings) if face_loaded else None)
-    age_service = AgeService(settings.age_scale, settings.age_bias)
+    age_service = AgeService()
     gender_service = GenderService()
     quality = FaceQualityService(settings.face_blur)
     attribute_aggregator = AttributeAggregator(window_sec=settings.window_sec)

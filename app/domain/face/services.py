@@ -64,6 +64,7 @@ class FaceDetectionService:
                 if landmarks:
                     face["landmarks"] = [
                         [int(px) + x1, int(py) + y1] for px, py in landmarks]
+                face["human_box"] = list(human["box"])
                 found.append(face)
         unique: list[Face] = []
         for face in found:

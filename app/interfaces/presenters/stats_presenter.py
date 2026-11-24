@@ -73,10 +73,6 @@ class StatsPresenter:
             "age_gender_rknn_model": attributes.get("rknn_model"),
             "age_gender_align": attributes.get("align"),
             "face_blur_min": attributes.get("blur"),
-            "age_calibration": {
-                "scale": attributes.get("scale"),
-                "bias": attributes.get("bias"),
-            },
             "headpose_enabled": self.settings.headpose_enable,
             "headpose_loaded": headpose.get("loaded", False),
             "infer_fps": round(self.processor.infer_fps, 1),

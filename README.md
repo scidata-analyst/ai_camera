@@ -91,17 +91,15 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `FACE_MIN_SIZE` | `60` | Minimum face side in pixels for age/gender; `0` = analyze every face |
 | `FACE_BLUR` | `80` | Min Laplacian variance of the face crop; `0` disables the blur gate. Blurry frames get no new age/gender prediction |
 | `AGE_GENDER_ALIGN` | `roll` | Face crop mode for age/gender: `box` (official), `roll` (eye-line levelled, default), `arcface` (full 5-point alignment, experimental) |
-| `AGE_SCALE` | `1.0` | Age calibration multiplier: `age = round(raw_age * AGE_SCALE + AGE_BIAS)` |
-| `AGE_BIAS` | `0.0` | Age calibration offset in years |
 | `FACE_EVERY` | `1` | Run face detection every N inference frames |
 | `MAX_FACES` | `0` | Per-frame face cap; `0` = unlimited (detect all) |
 | `HEADPOSE_ENABLE` | `1` | WHENet head-pose stage on NPU |
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels average every detected human frame for 1 second (gender = average signed confidence, age = rounded mean), then **lock** that value for the tracked face to avoid flicker. The lock is not permanent: a track expires after a few seconds without the face, and a run of consistent fresh predictions that disagree with the locked gender/age breaks the lock and re-locks with the new value. Tracks are matched per person by face-box IoU, so multiple people in one frame keep separate ages/genders; a missing face never copies another person's value. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
+GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Every age/gender prediction made during a rolling 1-second window is kept per person. Tracks are matched by **human-box IoU**, so multiple people keep separate results. The displayed age is the rounded mean of that person's age samples in the window; the displayed gender is the majority vote of the window's predictions (for example, 6 male vs 4 female gives male). A tie uses the most recent prediction. No locking or sticky cache is applied. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
 
-Quality gates: faces smaller than `FACE_MIN_SIZE` or crops with Laplacian variance below `FACE_BLUR` are skipped, so a blurry frame cannot create a wrong locked value. `AGE_GENDER_ALIGN=roll` keeps the model's original 1.5x framing but levels the eye line from the five RetinaFace landmarks; `arcface` does full landmark alignment (experimental — this model was trained on box-centre crops, so A/B test before using it). `/api/faces` reports `sharpness`, `blurry`, `raw_age` and `align` for tuning. For systematic age bias, collect a few `(raw_age, real_age)` pairs and set `AGE_SCALE`/`AGE_BIAS` from a least-squares fit (`AGE_SCALE = cov(raw, real) / var(raw)`, `AGE_BIAS = mean(real) - AGE_SCALE * mean(raw)`); leave both at defaults until you have samples.
+Quality gates: faces smaller than `FACE_MIN_SIZE` or crops with Laplacian variance below `FACE_BLUR` are skipped, so a blurry frame does not add a bad sample. `AGE_GENDER_ALIGN=roll` keeps the model's original 1.5x framing but levels the eye line from the five RetinaFace landmarks; `arcface` does full landmark alignment (experimental — this model was trained on box-centre crops, so A/B test before using it). `/api/faces` reports `sharpness`, `blurry`, `raw_age` and `align` for tuning.
 
 ## Existing exporters
 

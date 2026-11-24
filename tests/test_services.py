@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import patch
 
 from app.config.settings import Settings
-from app.domain.aggregation.services import CountAggregator
+from app.domain.aggregation.services import (
+    AttributeAggregator,
+    CountAggregator,
+)
 from app.domain.detection.services import HumanDetectionService
 
 
@@ -59,6 +62,45 @@ class CountAggregatorTests(unittest.TestCase):
         result = aggregator.current
         self.assertEqual(result["human"]["mode"], 3)
         self.assertEqual(result["samples"], 1)
+
+
+class AttributeAggregatorTests(unittest.TestCase):
+    def test_person_wise_mean_age_and_majority_gender(self):
+        aggregator = AttributeAggregator(window_sec=1.0)
+        aggregator.add([
+            {"human_box": [0, 0, 100, 100], "box": [10, 10, 30, 30],
+             "gender": "Male", "age": 30},
+            {"human_box": [200, 0, 300, 100], "box": [210, 10, 230, 30],
+             "gender": "Female", "age": 50},
+        ])
+        second = [
+            {"human_box": [1, 0, 101, 100], "box": [11, 10, 31, 30],
+             "gender": "Male", "age": 32},
+            {"human_box": [201, 0, 301, 100], "box": [211, 10, 231, 30],
+             "gender": "Female", "age": 48},
+            {"human_box": [1, 0, 101, 100], "box": [12, 10, 32, 30],
+             "gender": "Female", "age": 34},
+        ]
+        aggregator.add(second)
+        result = aggregator.fill([dict(face) for face in second])
+        self.assertEqual(result[0]["gender"], "Male")
+        self.assertEqual(result[0]["age"], 32)
+        self.assertEqual(result[1]["gender"], "Female")
+        self.assertEqual(result[1]["age"], 49)
+
+    def test_window_expiry(self):
+        aggregator = AttributeAggregator(window_sec=1.0)
+        face = {"human_box": [0, 0, 100, 100], "box": [10, 10, 30, 30],
+                "gender": "Male", "age": 30}
+        with patch("app.domain.aggregation.services.time.time",
+                   return_value=0.0):
+            aggregator.add([face])
+        with patch("app.domain.aggregation.services.time.time",
+                   return_value=2.0):
+            result = aggregator.fill([dict(face)])
+        self.assertEqual(result[0]["gender"], "Male")
+        self.assertEqual(result[0]["age"], 30)
+        self.assertEqual(aggregator.tracks, [])
 
 
 if __name__ == "__main__":

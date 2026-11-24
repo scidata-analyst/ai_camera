@@ -49,8 +49,6 @@ services:
       - AGE_GENDER_BACKEND=rknn
       - AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn
       - AGE_GENDER_ALIGN=roll
-      - AGE_SCALE=1.0
-      - AGE_BIAS=0.0
       - HEADPOSE_ENABLE=1
       - HEADPOSE_BACKEND=rknn
       - HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn

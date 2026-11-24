@@ -80,8 +80,6 @@ class Settings:
     age_rknn_path: str
     face_blur: float
     age_align: str
-    age_scale: float
-    age_bias: float
     headpose_backend: str
     headpose_onnx_path: str
     headpose_rknn_path: str
@@ -130,8 +128,6 @@ class Settings:
             age_rknn_path=_text("AGE_GENDER_RKNN_MODEL", DEFAULT_AGE_RKNN),
             face_blur=_float("FACE_BLUR", 80.0),
             age_align=align,
-            age_scale=_float("AGE_SCALE", 1.0),
-            age_bias=_float("AGE_BIAS", 0.0),
             headpose_backend=_text("HEADPOSE_BACKEND", "rknn").lower(),
             headpose_onnx_path=_text("HEADPOSE_MODEL", DEFAULT_HEADPOSE_ONNX),
             headpose_rknn_path=_text("HEADPOSE_RKNN_MODEL", DEFAULT_HEADPOSE_RKNN),
