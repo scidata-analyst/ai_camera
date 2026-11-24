@@ -32,8 +32,19 @@ class StatsPresenter:
             "age_gender": attributes.get("backend", "off"),
             "head_pose": headpose.get("backend", "off"),
         }
+        ready = (
+            self.camera.connected
+            and human.get("loaded", False)
+            and (self.processor.face_detection is None
+                 or face.get("loaded", False))
+            and (self.processor.attributes is None
+                 or attributes.get("loaded", False))
+            and (self.processor.headpose is None
+                 or not self.settings.headpose_enable
+                 or headpose.get("loaded", False))
+        )
         return {
-            "status": "ok",
+            "status": "ok" if ready else "degraded",
             "camera_connected": self.camera.connected,
             "model": self.settings.model_name,
             "conf": self.settings.conf,

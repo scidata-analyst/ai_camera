@@ -80,6 +80,7 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             for face in faces:
                 if "looking" not in face:
                     continue
+                stamp = float(face.get("t", now))
                 entry = {
                     "box": list(face["box"]),
                     "yaw": face.get("yaw", 0.0),
@@ -87,11 +88,13 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                     "roll": face.get("roll", 0.0),
                     "looking": bool(face.get("looking")),
                     "t": now,
+                    "stamp": stamp,
                 }
                 replaced = False
                 for cached in self._cache:
                     if iou(face["box"], cached["box"]) >= self._iou_thr:
-                        cached.update(entry)
+                        if stamp >= cached.get("stamp", 0.0):
+                            cached.update(entry)
                         replaced = True
                         break
                 if not replaced:

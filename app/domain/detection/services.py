@@ -19,6 +19,7 @@ class HumanDetectionService:
         self._frame_no = 0
         self._last: list[Detection] = []
         self._last_time = 0.0
+        self._has_result = False
         self.last_ms = 0.0
 
     @property
@@ -37,8 +38,8 @@ class HumanDetectionService:
 
     def detect(self, frame) -> list[Detection]:
         self._frame_no += 1
-        run = (self._frame_no % self.detect_every == 0) or not self._last
-        if not run and self._last_time and \
+        run = (self._frame_no % self.detect_every == 0) or not self._has_result
+        if not run and self._has_result and \
                 time.time() - self._last_time > self.stale_sec:
             self._last = []
             run = True
@@ -48,6 +49,7 @@ class HumanDetectionService:
             self.last_ms = round((time.perf_counter() - started) * 1000, 1)
             self._last = [dict(d) for d in results if self._keep(d)]
             self._last_time = time.time()
+            self._has_result = True
         else:
             self._last = [dict(d) for d in self._last if self._keep(d)]
         return [dict(d) for d in self._last]

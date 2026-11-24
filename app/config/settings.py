@@ -35,7 +35,15 @@ def _float(name: str, default: float) -> float:
 
 
 def _bool(name: str, default: bool) -> bool:
-    return _text(name, "1" if default else "0") == "1"
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be 0/1/true/false, got {raw!r}")
 
 
 @dataclass(frozen=True)
@@ -52,7 +60,6 @@ class Settings:
     flip_h: bool
     flip_v: bool
     cv_threads: int
-    torch_threads: int
     yolo_backend: str
     rknn_model: str
     rknpu_core: str
@@ -103,7 +110,6 @@ class Settings:
             flip_h=_bool("FLIP_H", False),
             flip_v=_bool("FLIP_V", False),
             cv_threads=_int("CV_THREADS", 4),
-            torch_threads=_int("TORCH_THREADS", min(4, os.cpu_count() or 4)),
             yolo_backend=_text("YOLO_BACKEND", "rknn").lower(),
             rknn_model=_text("RKNN_MODEL", DEFAULT_YOLO_RKNN),
             rknpu_core=_text("RKNPU_CORE", "AUTO"),

@@ -1,42 +1,38 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 
-from ..flip_state import FlipState
-from ..presenters.stats_presenter import StatsPresenter
+from ..auth import require_token
+
+router = APIRouter(dependencies=[Depends(require_token)])
 
 
-class ApiController:
-    def __init__(self, presenter: StatsPresenter, flip: FlipState):
-        self.presenter = presenter
-        self.flip = flip
-        self.router = APIRouter()
-        self._register()
+@router.get("/api/health")
+def health(request: Request):
+    return request.app.state.runtime.presenter.health()
 
-    def _register(self) -> None:
-        self.router.add_api_route("/api/health", self.health, methods=["GET"])
-        self.router.add_api_route("/api/faces", self.faces, methods=["GET"])
-        self.router.add_api_route("/api/stats", self.stats, methods=["GET"])
-        self.router.add_api_route("/api/flip", self.get_flip, methods=["GET"])
-        self.router.add_api_route("/api/flip/set", self.set_flip,
-                                  methods=["POST"])
-        self.router.add_api_route("/api/flip/toggle", self.toggle_flip,
-                                  methods=["POST"])
 
-    def health(self):
-        return self.presenter.health()
+@router.get("/api/faces")
+def faces(request: Request):
+    return request.app.state.runtime.presenter.faces()
 
-    def faces(self):
-        return self.presenter.faces()
 
-    def stats(self):
-        return self.presenter.stats()
+@router.get("/api/stats")
+def stats(request: Request):
+    return request.app.state.runtime.presenter.stats()
 
-    def get_flip(self):
-        return self.flip.as_dict()
 
-    def set_flip(self, h: int = None, v: int = None):
-        return self.flip.set(h, v)
+@router.get("/api/flip")
+def get_flip(request: Request):
+    return request.app.state.runtime.flip.as_dict()
 
-    def toggle_flip(self, axis: str = "h"):
-        return self.flip.toggle(axis)
+
+@router.post("/api/flip/set")
+def set_flip(request: Request, h: int | None = None,
+             v: int | None = None):
+    return request.app.state.runtime.flip.set(h, v)
+
+
+@router.post("/api/flip/toggle")
+def toggle_flip(request: Request, axis: str = "h"):
+    return request.app.state.runtime.flip.toggle(axis)

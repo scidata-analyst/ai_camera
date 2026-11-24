@@ -72,5 +72,7 @@ class FaceDetectionService:
             self._last = [dict(face) for face in faces]
         else:
             faces = [dict(face) for face in self._last]
+            if self.headpose is not None:
+                faces = self.headpose.fill_from_cache(faces)
         self.recognizer.fill(faces)
         return faces

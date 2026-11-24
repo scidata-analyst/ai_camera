@@ -10,7 +10,7 @@ class OpenCVFrameRenderer(FrameRenderer):
     def draw_faces(self, frame: np.ndarray, faces: list[dict]) -> None:
         for face in faces:
             x1, y1, x2, y2 = face["box"]
-            color = (0, 255, 0) if face.get("looking") else (255, 255, 0)
+            color = (0, 255, 0) if face.get("looking") else (0, 255, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             for px, py in face.get("landmarks", []):
                 cv2.circle(frame, (int(px), int(py)), 2, (0, 0, 255), -1)

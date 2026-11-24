@@ -22,12 +22,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AGE_GENDER_BACKEND=rknn \
     AGE_GENDER_MODEL=/app/models/genderage.onnx \
     AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn \
-    HEADPOSE_PROVIDER=auto \
     HEADPOSE_BACKEND=rknn \
     HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn \
     OPENCV_OPENCL=auto \
-    TORCH_THREADS=2 \
-    ORT_THREADS=1 \
     OMP_NUM_THREADS=2 \
     OPENBLAS_NUM_THREADS=2 \
     FACE_MIN_SIZE=60 \
@@ -47,9 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip "setuptools<81" wheel && \
-    pip install --no-deps --retries 5 --timeout 120 --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 torchvision==0.23.0 && \
     pip install --retries 5 --timeout 120 -r requirements.txt && \
-    pip install --no-deps --retries 5 --timeout 120 ultralytics==8.3.253 && \
     if [ "$(uname -m)" = "aarch64" ] || [ "$TARGETARCH" = "arm64" ]; then \
       pip install "rknn-toolkit-lite2==${RKNN_VERSION}" && \
       python -c "from urllib.request import urlretrieve; urlretrieve('https://raw.githubusercontent.com/airockchip/rknn-toolkit2/v${RKNN_VERSION}/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so', '/usr/lib/librknnrt.so')"; \

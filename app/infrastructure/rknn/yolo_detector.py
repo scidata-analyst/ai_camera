@@ -48,11 +48,22 @@ class RknnPersonDetector(PersonDetector):
 
     def _empty(self):
         if not self._warned:
-            print("[yolo] NPU returned no outputs (inference fail)")
+            print("[yolo] inference returned no detections")
             self._warned = True
         return []
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
+        if self.rknn is None:
+            raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
+        try:
+            return self._detect_boxes(frame)
+        except Exception as exc:
+            if not self._warned:
+                print(f"[yolo] inference failed: {exc}")
+                self._warned = True
+            return []
+
+    def _detect_boxes(self, frame: np.ndarray) -> list[Detection]:
         if self.rknn is None:
             raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
         height, width = frame.shape[:2]
