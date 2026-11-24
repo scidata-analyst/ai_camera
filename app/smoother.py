@@ -105,21 +105,27 @@ def _most_common(values):
 
 
 class FaceAttributeSmoother:
-    """1-sec average, then LOCK the value for that face.
+    """1-sec average, then LOCK — but the lock can be re-checked and expires.
 
     Box-IoU diye eki face-er track dhore proti 1 sec-er sob prediction-er
-    average hoy. Window complete holei value lock kora jay — tar por frame
-    joto thaklo, age/gender ar badla jay na. Face move/new face hole notun
-    track banay; tahari naya value ase.
+    average hoy. Window complete holei value lock kora jay. Lock chirokal
+    thake na: (1) face kichu sec-er jonno na dekha hole track expire hoy,
+    (2) fresh prediction-gulo locked value-er sathe consistently mile na hole
+    lock bhanga hoy. Tahari bhrantiyo value chokhe thake na.
     """
 
     def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.50,
-                 max_tracks: int = 100, hold_sec: float = 5.0):
+                 max_tracks: int = 100, hold_sec: float = 5.0,
+                 review_n: int = 5, age_tol: float = 6.0):
         self.window_sec = float(window_sec)
         self.iou_thr = float(iou_thr)
         self.max_tracks = int(max_tracks)
         self.hold_sec = max(float(hold_sec), self.window_sec)
-        # track = {box, created, samples, last_good, locked}
+        self.review_n = max(2, int(review_n))
+        self.age_tol = float(age_tol)
+        self.review_min_conf = 0.55
+        # track = {box, created, samples, last_good, locked,
+        #          last_seen, review}
         self.tracks: list = []
 
     @staticmethod
@@ -145,10 +151,10 @@ class FaceAttributeSmoother:
     def _signed(gender: str, conf: float) -> float:
         return float(conf) if gender == "Male" else -float(conf)
 
-    @staticmethod
-    def _new_track(box, now, good=None) -> dict:
+    def _new_track(self, box, now, good=None) -> dict:
         return {"box": box, "created": now, "samples": collections.deque(),
-                "last_good": good, "locked": None}
+                "last_good": good, "locked": None, "last_seen": now,
+                "review": collections.deque(maxlen=self.review_n)}
 
     @staticmethod
     def _average(samples, now: float) -> dict:
@@ -163,13 +169,49 @@ class FaceAttributeSmoother:
 
     def _prune(self, now: float):
         cutoff = now - self.window_sec
+        stale = now - self.hold_sec
         for track in self.tracks:
             while track["samples"] and track["samples"][0][0] < cutoff:
                 track["samples"].popleft()
-        # Locked/sticky value expire hoy na; max_tracks-e hole oldest badlo.
+        # Face kichu sec-er jonno na dekha holei track (ar tar lock) bad dao.
+        # Na hole purono locked value naya manush-er upor chole jay.
+        self.tracks = [t for t in self.tracks
+                       if t.get("last_seen", t["created"]) >= stale]
         self.tracks.sort(key=lambda t: (
             (t["locked"] or t["last_good"] or {"t": 0.0})["t"]))
         self.tracks = self.tracks[-self.max_tracks:]
+
+    def _review_lock(self, track, gender: str, conf: float, age: int,
+                     now: float):
+        """Fresh predictions diye purono locked value re-check koro.
+
+        Eki track-e (box-IoU te mile) naya manush chole ele, ba age/gender
+        bhitore fer change hole, kichu frame-er consistent prediction diye
+        lock bhanga hoy — tahari purono wrong value chokhe thake na.
+        """
+        track["review"].append(
+            (now, self._signed(gender, conf), int(age)))
+        if len(track["review"]) < self.review_n:
+            return
+        locked = track["locked"]
+        if locked is None:
+            return
+        vals = list(track["review"])
+        signed_mean = sum(v[1] for v in vals) / len(vals)
+        age_mean = sum(v[2] for v in vals) / len(vals)
+        new_gender = "Male" if signed_mean >= 0 else "Female"
+        gender_flip = new_gender != locked["gender"]
+        age_shift = abs(age_mean - locked["age"]) > self.age_tol
+        # Kam confidence-e gender flip korbo na; age shift-e ovichol chai na.
+        if gender_flip and abs(signed_mean) < self.review_min_conf:
+            return
+        if not gender_flip and not age_shift:
+            return
+        track["locked"] = None
+        track["last_good"] = None
+        track["created"] = now - self.window_sec  # porer fill-ei relock
+        track["samples"] = collections.deque(vals)
+        track["review"].clear()
 
     def add(self, faces):
         """Store instant predictions. Only call when a fresh face infer ran."""
@@ -186,8 +228,11 @@ class FaceAttributeSmoother:
                 track = self._new_track(box, now)
                 self.tracks.append(track)
             track["box"] = box
+            track["last_seen"] = now
             if track["locked"] is not None:
-                track["locked"]["t"] = now  # value notun kore janbe na
+                # Age/gender ar change korbe na — kintu fresh prediction
+                # diye review chole, plus track expiry-te lock-o mochhe.
+                self._review_lock(track, str(gender), conf, int(age), now)
                 continue
             track["samples"].append(
                 (now, self._signed(str(gender), conf), int(age)))
@@ -212,6 +257,7 @@ class FaceAttributeSmoother:
                         "conf": float(face.get("gconf", 0.0))}
                 track = self._new_track(box, now, good)
                 self.tracks.append(track)
+            track["last_seen"] = now
 
             if track["locked"] is not None:
                 value, method, samples_n = track["locked"], "locked", 0
@@ -219,10 +265,11 @@ class FaceAttributeSmoother:
                 samples_n = len(track["samples"])
                 value = self._average(track["samples"], now)
                 if now - track["created"] >= self.window_sec:
-                    # 1 sec complete → lock forever. Ar kisui change korbe na.
+                    # 1 sec complete → lock. Review/expiry-e ei lock bhanga jay.
                     track["locked"] = value
                     track["last_good"] = value
                     track["samples"].clear()
+                    track["review"].clear()
                     method = "locked"
                 else:
                     method = "mean"

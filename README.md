@@ -72,7 +72,7 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels average every detected human frame for 1 second (gender = average signed confidence, age = rounded mean), then **lock** that value for the tracked face — the label neither flickers nor changes without a new/moving face. Tracks are matched per person by face-box IoU, so multiple people in one frame keep separate ages/genders; a missing face keeps its own last value and never copies another person's. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
+GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels average every detected human frame for 1 second (gender = average signed confidence, age = rounded mean), then **lock** that value for the tracked face to avoid flicker. The lock is not permanent: a track expires after a few seconds without the face, and a run of consistent fresh predictions that disagree with the locked gender/age breaks the lock and re-locks with the new value. Tracks are matched per person by face-box IoU, so multiple people in one frame keep separate ages/genders; a missing face never copies another person's value. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
 
 ## Existing exporters
 
