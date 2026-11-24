@@ -19,7 +19,9 @@ services:
       - "/sys:/sys:ro"
       - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
       - ./models:/app/models
+      - ./settings:/app/config
     environment:
+      - SETTINGS_FILE=/app/config/saved_settings.json
       - CAMERA_SOURCE=/dev/video11
       - YOLO_BACKEND=rknn
       - RKNN_MODEL=/app/models/yolo11n-rk3576.rknn

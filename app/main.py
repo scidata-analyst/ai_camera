@@ -10,6 +10,7 @@ from .application.attribute_recognition import AttributeRecognitionService
 from .application.frame_processor import FrameProcessor
 from .application.head_pose import HeadPoseService
 from .config.settings import Settings
+from .config.settings_store import load_saved
 from .domain.aggregation.services import (
     AttributeAggregator,
     CountAggregator,
@@ -32,6 +33,7 @@ from .interfaces.presenters.stats_presenter import StatsPresenter
 
 
 def _build_runtime() -> SimpleNamespace:
+    load_saved()
     settings = Settings.from_env()
 
     try:
