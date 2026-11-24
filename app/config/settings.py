@@ -64,7 +64,6 @@ class Settings:
     rknn_model: str
     rknpu_core: str
     detect_every: int
-    max_faces: int
     person_conf: float
     person_min_h: int
     person_require_face: bool
@@ -112,7 +111,6 @@ class Settings:
             rknn_model=_text("RKNN_MODEL", DEFAULT_YOLO_RKNN),
             rknpu_core=_text("RKNPU_CORE", "AUTO"),
             detect_every=max(1, _int("DETECT_EVERY", 2)),
-            max_faces=max(0, _int("MAX_FACES", 0)),
             person_conf=_float("PERSON_CONF", 0.65),
             person_min_h=_int("PERSON_MIN_H", 0),
             person_require_face=_bool("PERSON_REQUIRE_FACE", False),

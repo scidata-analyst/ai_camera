@@ -38,7 +38,6 @@ services:
       - STREAM_FPS=25
       - SMOOTH_WINDOW=1.0
       - DETECT_EVERY=2
-      - MAX_FACES=0
       - FACE_EVERY=1
       - FACE_ENABLE=1
       - FACE_BACKEND=rknn

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import collections
-import math
 import statistics
 import time
 
@@ -79,91 +78,43 @@ class CountAggregator:
 
 
 class AttributeAggregator:
-    def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.50,
-                 max_tracks: int = 100):
+    def __init__(self, window_sec: float = 1.0, max_tracks: int = 100):
         self.window_sec = float(window_sec)
-        self.iou_thr = float(iou_thr)
         self.max_tracks = int(max_tracks)
-        self.tracks: list = []
-
-    @staticmethod
-    def _iou(a, b) -> float:
-        x1, y1 = max(a[0], b[0]), max(a[1], b[1])
-        x2, y2 = min(a[2], b[2]), min(a[3], b[3])
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        if inter <= 0:
-            return 0.0
-        area = ((a[2] - a[0]) * (a[3] - a[1]) +
-                (b[2] - b[0]) * (b[3] - b[1]))
-        return inter / max(area - inter, 1e-6)
-
-    @staticmethod
-    def _box(face) -> list:
-        return [int(value) for value in face.get("human_box") or face["box"]]
-
-    @staticmethod
-    def _center(box) -> tuple[float, float]:
-        return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
-
-    def _match(self, face):
-        person_id = face.get("person_id")
-        if person_id is not None:
-            for track in self.tracks:
-                if track.get("id") == person_id:
-                    return track
-        box = self._box(face)
-        source = face.get("human_box")
-        reference = source if source is not None else box
-        cx, cy = self._center(reference)
-        size = max(1, min(reference[2] - reference[0],
-                          reference[3] - reference[1]))
-        best, best_score = None, 0.0
-        for track in self.tracks:
-            overlap = self._iou(reference, track["box"])
-            if overlap < self.iou_thr:
-                continue
-            tx, ty = self._center(track["box"])
-            distance = math.hypot(cx - tx, cy - ty)
-            if distance > size * 0.15 and overlap < 0.8:
-                continue
-            score = overlap - distance / size
-            if score > best_score:
-                best, best_score = track, score
-        return best
+        self.tracks: dict = {}
 
     def _prune(self, now: float):
         cutoff = now - self.window_sec
-        for track in self.tracks:
-            while track["samples"] and track["samples"][0][0] < cutoff:
-                track["samples"].popleft()
-        self.tracks = [track for track in self.tracks if track["samples"]]
-        self.tracks = self.tracks[-self.max_tracks:]
+        for person_id in list(self.tracks):
+            samples = self.tracks[person_id]
+            while samples and samples[0][0] < cutoff:
+                samples.popleft()
+            if not samples:
+                del self.tracks[person_id]
+        overflow = len(self.tracks) - self.max_tracks
+        if overflow > 0:
+            for person_id in list(self.tracks)[:overflow]:
+                del self.tracks[person_id]
 
     def add(self, faces):
         now = time.time()
         for face in faces:
+            person_id = face.get("person_id")
+            if person_id is None:
+                continue
             gender = face.get("gender")
             age = face.get("age")
             if gender not in ("Male", "Female") or age in (None, 0):
                 continue
-            box = self._box(face)
-            track = self._match(face)
-            if track is None:
-                track = {"id": face.get("person_id"), "box": box,
-                         "samples": collections.deque()}
-                self.tracks.append(track)
-            track["box"] = box
-            track["samples"].append((now, int(age), str(gender)))
+            samples = self.tracks.setdefault(person_id, collections.deque())
+            samples.append((now, int(age), str(gender)))
         self._prune(now)
 
-    def fill(self, faces):
+    def results(self) -> dict:
         now = time.time()
         self._prune(now)
-        for face in faces:
-            track = self._match(face)
-            if track is None or not track["samples"]:
-                continue
-            samples = track["samples"]
+        output = {}
+        for person_id, samples in self.tracks.items():
             ages = [sample[1] for sample in samples]
             males = sum(1 for sample in samples if sample[2] == "Male")
             females = sum(1 for sample in samples if sample[2] == "Female")
@@ -173,11 +124,19 @@ class AttributeAggregator:
                 gender = "Female"
             else:
                 gender = samples[-1][2]
-            face.update({
+            output[person_id] = {
                 "gender": gender,
                 "age": int(round(statistics.mean(ages))),
                 "gconf": round(max(males, females) / len(samples), 3),
                 "attr_samples": len(samples),
                 "attr_method": "mean",
-            })
+            }
+        return output
+
+    def fill(self, faces):
+        results = self.results()
+        for face in faces:
+            result = results.get(face.get("person_id"))
+            if result is not None:
+                face.update(result)
         return faces

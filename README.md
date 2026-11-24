@@ -82,7 +82,7 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `AGE_GENDER_MODEL` | `/app/models/genderage.onnx` | Legacy path (unused in NPU-only mode) |
 | `AGE_GENDER_RKNN_MODEL` | `/app/models/genderage-rk3576.rknn` | GenderAge RKNN model |
 | `CONF_THRESHOLD` | `0.5` | NMS score floor for person boxes |
-| `PERSON_CONF` | `0.65` | Separate, higher score required for a `person` box (false "Human" fix) |
+| `PERSON_CONF` | `0.65` | Minimum score required for a `person` box |
 | `PERSON_MIN_H` | `0` | Minimum person-box height in pixels; `0` = no size limit |
 | `PERSON_REQUIRE_FACE` | `0` | Set to `1` to accept a person box only when a face lies inside it |
 | `DET_STALE_SEC` | `0.2` | Max age of a reused box before YOLO is forced to re-run |
@@ -91,8 +91,7 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `FACE_MIN_SIZE` | `60` | Minimum face side in pixels for age/gender; `0` = analyze every face |
 | `FACE_BLUR` | `80` | Min Laplacian variance of the face crop; `0` disables the blur gate. Blurry frames get no new age/gender prediction |
 | `AGE_GENDER_ALIGN` | `roll` | Face crop mode for age/gender: `box` (official), `roll` (eye-line levelled, default), `arcface` (full 5-point alignment, experimental) |
-| `FACE_EVERY` | `1` | Run face detection every N inference frames |
-| `MAX_FACES` | `0` | Per-frame face cap; `0` = unlimited (detect all) |
+| `FACE_EVERY` | `1` | Run face detection every N inference frames; every detected person is analyzed |
 | `HEADPOSE_ENABLE` | `1` | WHENet head-pose stage on NPU |
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |

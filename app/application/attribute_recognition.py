@@ -41,6 +41,9 @@ class AttributeRecognitionService(FaceAttributeRecognizer):
     def fill(self, faces: list[Face]) -> list[Face]:
         return self.aggregator.fill(faces)
 
+    def results(self) -> dict:
+        return self.aggregator.results()
+
     def describe(self) -> dict:
         details = dict(self.estimator.describe())
         details.update({

@@ -66,7 +66,7 @@ def _build_runtime() -> SimpleNamespace:
     headpose = (HeadPoseService(headpose_adapter, True)
                 if headpose_adapter is not None else None)
     face_detection = (FaceDetectionService(
-        face_detector, settings.max_faces, settings.face_every,
+        face_detector, settings.face_every,
         attributes, headpose)
         if face_detector is not None and attributes is not None else None)
     human_detection = HumanDetectionService(

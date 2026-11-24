@@ -121,7 +121,7 @@ class RknnPersonDetector(PersonDetector):
         ]
         try:
             picked = cv2.dnn.NMSBoxes(
-                nms_boxes, confs.tolist(), self.conf, 0.45)
+                nms_boxes, confs.tolist(), self.conf, 0.6)
             picked = [int(value) for value in np.asarray(picked).reshape(-1)]
         except Exception:
             picked = list(range(len(nms_boxes)))

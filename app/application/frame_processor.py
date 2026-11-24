@@ -32,6 +32,18 @@ class FrameProcessor:
         self._t_prev = time.time()
         self._fps_smooth = 0.0
 
+    def _apply_attributes(self, detections) -> None:
+        results = self.attributes.results() if self.attributes is not None else {}
+        for detection in detections:
+            result = results.get(detection.get("person_id"))
+            if result is None:
+                detection["age"] = 0
+                detection["gender"] = "Unknown"
+                continue
+            detection["age"] = result["age"]
+            detection["gender"] = result["gender"]
+            detection["attr_samples"] = result["attr_samples"]
+
     def infer(self, frame):
         source_frame = frame.copy()
         started = time.perf_counter()
@@ -42,7 +54,8 @@ class FrameProcessor:
             faces = self.face_detection.detect(frame, source_frame, detections)
             self.renderer.draw_faces(frame, faces)
         detections = self.human_detection.require_face(detections, faces)
-        self.renderer.draw_humans(frame, detections, faces)
+        self._apply_attributes(detections)
+        self.renderer.draw_humans(frame, detections)
 
         human_n = sum(1 for detection in detections
                       if detection["kind"] == "human")

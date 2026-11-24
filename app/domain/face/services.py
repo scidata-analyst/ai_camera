@@ -28,11 +28,10 @@ class FaceQualityService:
 
 
 class FaceDetectionService:
-    def __init__(self, detector: FaceDetector, max_faces: int,
-                 detect_every: int, recognizer: FaceAttributeRecognizer,
+    def __init__(self, detector: FaceDetector, detect_every: int,
+                 recognizer: FaceAttributeRecognizer,
                  headpose: HeadPoseAnalyzer | None):
         self.detector = detector
-        self.max_faces = int(max_faces)
         self.detect_every = max(1, int(detect_every))
         self.recognizer = recognizer
         self.headpose = headpose
@@ -84,12 +83,6 @@ class FaceDetectionService:
             started = time.perf_counter()
             faces = self._detect_in_humans(source_frame, humans or [])
             self.last_ms = round((time.perf_counter() - started) * 1000, 1)
-            if self.max_faces > 0 and len(faces) > self.max_faces:
-                faces = sorted(
-                    faces,
-                    key=lambda face: -((face["box"][2] - face["box"][0]) *
-                                       (face["box"][3] - face["box"][1])),
-                )[:self.max_faces]
             started = time.perf_counter()
             self.recognizer.recognize(source_frame, faces)
             self.age_gender_ms = round(

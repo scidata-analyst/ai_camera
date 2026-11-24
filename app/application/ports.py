@@ -28,8 +28,7 @@ class FrameRenderer(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def draw_humans(self, frame: np.ndarray, detections: list[dict],
-                    faces: list[dict]) -> None:
+    def draw_humans(self, frame: np.ndarray, detections: list[dict]) -> None:
         raise NotImplementedError
 
     @abstractmethod
