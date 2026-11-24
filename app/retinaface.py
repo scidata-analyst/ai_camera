@@ -1,4 +1,3 @@
-"""RetinaFace 320x320 face detector with RKNN and OpenCV ONNX backends."""
 from __future__ import annotations
 
 import math
@@ -113,7 +112,6 @@ class RetinaFace:
         h, w = frame.shape[:2]
         letterboxed, ratio, pad_x, pad_y = self._letterbox(frame)
         rgb = cv2.cvtColor(letterboxed, cv2.COLOR_BGR2RGB)
-        # RKNN needs an explicit batch: (1, 320, 320, 3), not a bare HWC array.
         rknn_blob = np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.uint8)
         try:
             if self.rknn is not None:
@@ -125,7 +123,6 @@ class RetinaFace:
                 if not outputs:
                     raise RuntimeError("RKNN returned no outputs")
             else:
-                # RKNN conversion applies the same RGB mean subtraction.
                 blob = cv2.dnn.blobFromImage(
                     rgb, scalefactor=1.0, size=(MODEL_SIZE, MODEL_SIZE),
                     mean=(104, 117, 123), swapRB=False,
@@ -153,7 +150,6 @@ class RetinaFace:
             lm[:, :, 0] = np.clip((lm[:, :, 0] - pad_x) / ratio, 0, w - 1)
             lm[:, :, 1] = np.clip((lm[:, :, 1] - pad_y) / ratio, 0, h - 1)
 
-            # Kono count cap nai — joto face score pass korbe sob NMS-e jay.
             order = scores.argsort()[::-1]
             boxes, scores, lm = boxes[order], scores[order], lm[order]
             keep = _nms(boxes, scores, 0.5)
@@ -174,5 +170,4 @@ class RetinaFace:
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             for px, py in face.get("landmarks", []):
                 cv2.circle(frame, (int(px), int(py)), 2, (0, 0, 255), -1)
-            # Face box-e kono text/label dewa hoy na. Human box-ei label thakbe.
         return frame

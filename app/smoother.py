@@ -1,9 +1,3 @@
-"""1-sec window mean / median / mode smoother.
-
-Proti frame er instant count (human, non_human) joma hoy,
-proti 1 sec por por stable result publish hoy.
-Flicker komate mode = stable, mean/median = reference.
-"""
 import collections
 import statistics
 import time
@@ -13,11 +7,9 @@ def _safe_mode(values):
     if not values:
         return 0
     try:
-        # multimode sobcheye frequent gulo dey, prothom ta stable
         modes = statistics.multimode(values)
         return int(modes[0])
     except Exception:
-        # fallback: most_common
         c = collections.Counter(values)
         return int(c.most_common(1)[0][0])
 
@@ -35,7 +27,7 @@ def _stats(values):
 class CountSmoother:
     def __init__(self, window_sec: float = 1.0):
         self.window_sec = float(window_sec)
-        self.history: collections.deque = collections.deque()  # (t,h,n,f,m,w)
+        self.history: collections.deque = collections.deque()
         self._cached = {
             "human": {"mean": 0.0, "median": 0, "mode": 0},
             "non_human": {"mean": 0.0, "median": 0, "mode": 0},
@@ -50,19 +42,17 @@ class CountSmoother:
             "samples": 0,
             "updated_at": time.time(),
         }
-        self._last_publish = 0.0  # force first publish
+        self._last_publish = 0.0
 
     def add(self, human: int, non_human: int, face: int = 0,
             male: int = 0, female: int = 0):
         now = time.time()
         self.history.append((now, int(human), int(non_human),
                              int(face), int(male), int(female)))
-        # purono sample bad dao
         cutoff = now - self.window_sec
         while self.history and self.history[0][0] < cutoff:
             self.history.popleft()
 
-        # 1 sec por por publish
         if now - self._last_publish >= self.window_sec:
             self._last_publish = now
             hs = [x[1] for x in self.history]
@@ -81,7 +71,6 @@ class CountSmoother:
                 "face": f_stat,
                 "male": m_stat,
                 "female": w_stat,
-                # stable = mode (sobcheye frequent), flicker-free
                 "stable_human": h_stat["mode"],
                 "stable_non_human": n_stat["mode"],
                 "stable_face": f_stat["mode"],
@@ -98,21 +87,12 @@ class CountSmoother:
 
 
 def _most_common(values):
-    """Mode for any hashable values (gender string, age int, ...)."""
     if not values:
         return None
     return collections.Counter(values).most_common(1)[0][0]
 
 
 class FaceAttributeSmoother:
-    """1-sec average, then LOCK — but the lock can be re-checked and expires.
-
-    Box-IoU diye eki face-er track dhore proti 1 sec-er sob prediction-er
-    average hoy. Window complete holei value lock kora jay. Lock chirokal
-    thake na: (1) face kichu sec-er jonno na dekha hole track expire hoy,
-    (2) fresh prediction-gulo locked value-er sathe consistently mile na hole
-    lock bhanga hoy. Tahari bhrantiyo value chokhe thake na.
-    """
 
     def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.50,
                  max_tracks: int = 100, hold_sec: float = 5.0,
@@ -124,8 +104,6 @@ class FaceAttributeSmoother:
         self.review_n = max(2, int(review_n))
         self.age_tol = float(age_tol)
         self.review_min_conf = 0.55
-        # track = {box, created, samples, last_good, locked,
-        #          last_seen, review}
         self.tracks: list = []
 
     @staticmethod
@@ -173,8 +151,6 @@ class FaceAttributeSmoother:
         for track in self.tracks:
             while track["samples"] and track["samples"][0][0] < cutoff:
                 track["samples"].popleft()
-        # Face kichu sec-er jonno na dekha holei track (ar tar lock) bad dao.
-        # Na hole purono locked value naya manush-er upor chole jay.
         self.tracks = [t for t in self.tracks
                        if t.get("last_seen", t["created"]) >= stale]
         self.tracks.sort(key=lambda t: (
@@ -183,12 +159,6 @@ class FaceAttributeSmoother:
 
     def _review_lock(self, track, gender: str, conf: float, age: int,
                      now: float):
-        """Fresh predictions diye purono locked value re-check koro.
-
-        Eki track-e (box-IoU te mile) naya manush chole ele, ba age/gender
-        bhitore fer change hole, kichu frame-er consistent prediction diye
-        lock bhanga hoy — tahari purono wrong value chokhe thake na.
-        """
         track["review"].append(
             (now, self._signed(gender, conf), int(age)))
         if len(track["review"]) < self.review_n:
@@ -202,19 +172,17 @@ class FaceAttributeSmoother:
         new_gender = "Male" if signed_mean >= 0 else "Female"
         gender_flip = new_gender != locked["gender"]
         age_shift = abs(age_mean - locked["age"]) > self.age_tol
-        # Kam confidence-e gender flip korbo na; age shift-e ovichol chai na.
         if gender_flip and abs(signed_mean) < self.review_min_conf:
             return
         if not gender_flip and not age_shift:
             return
         track["locked"] = None
         track["last_good"] = None
-        track["created"] = now - self.window_sec  # porer fill-ei relock
+        track["created"] = now - self.window_sec
         track["samples"] = collections.deque(vals)
         track["review"].clear()
 
     def add(self, faces):
-        """Store instant predictions. Only call when a fresh face infer ran."""
         now = time.time()
         for face in faces:
             gender = face.get("gender")
@@ -230,8 +198,6 @@ class FaceAttributeSmoother:
             track["box"] = box
             track["last_seen"] = now
             if track["locked"] is not None:
-                # Age/gender ar change korbe na — kintu fresh prediction
-                # diye review chole, plus track expiry-te lock-o mochhe.
                 self._review_lock(track, str(gender), conf, int(age), now)
                 continue
             track["samples"].append(
@@ -241,7 +207,6 @@ class FaceAttributeSmoother:
         self._prune(now)
 
     def fill(self, faces):
-        """Write locked/averaged/sticky gender-age onto each face."""
         now = time.time()
         self._prune(now)
         for face in faces:
@@ -265,7 +230,6 @@ class FaceAttributeSmoother:
                 samples_n = len(track["samples"])
                 value = self._average(track["samples"], now)
                 if now - track["created"] >= self.window_sec:
-                    # 1 sec complete → lock. Review/expiry-e ei lock bhanga jay.
                     track["locked"] = value
                     track["last_good"] = value
                     track["samples"].clear()
@@ -276,8 +240,6 @@ class FaceAttributeSmoother:
             elif track["last_good"]:
                 value, method, samples_n = track["last_good"], "sticky", 0
             else:
-                # Cross-person contamination korbo na: onno face-er age/gender
-                # kothono copy korbo na. Nije-er last value (ba Unknown) rakho.
                 value = {
                     "gender": face.get("gender") or "Unknown",
                     "age": int(face.get("age") or 0),

@@ -1,4 +1,3 @@
-"""InsightFace's lightweight age/gender head with RKNN and ONNX CPU backends."""
 from __future__ import annotations
 
 import math
@@ -13,7 +12,6 @@ INPUT_SIZE = 96
 DEFAULT_ONNX = "/app/models/genderage.onnx"
 DEFAULT_RKNN = "/app/models/genderage-rk3576.rknn"
 
-# InsightFace arcface 5-point template, normalised to a 112x112 crop.
 _ARCFACE_DST = np.array([
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -28,7 +26,6 @@ class AgeGender:
         self.onnx_path = os.getenv("AGE_GENDER_MODEL", DEFAULT_ONNX)
         self.rknn_path = os.getenv("AGE_GENDER_RKNN_MODEL", DEFAULT_RKNN)
         self.backend_want = os.getenv("AGE_GENDER_BACKEND", "rknn").lower()
-        # Quality gates: skip blurry crops, choose crop alignment, calibrate age.
         self.blur_thr = float(os.getenv("FACE_BLUR", "80"))
         self.align_mode = os.getenv("AGE_GENDER_ALIGN", "roll").lower()
         if self.align_mode not in ("box", "roll", "arcface"):
@@ -57,7 +54,6 @@ class AgeGender:
 
     @staticmethod
     def _sharpness(frame: np.ndarray, box) -> float:
-        """Laplacian variance of the raw face crop; low = motion blur."""
         x1, y1, x2, y2 = map(int, box)
         h, w = frame.shape[:2]
         xa, ya, xb, yb = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
@@ -86,8 +82,6 @@ class AgeGender:
         src = cls._landmarks(face)
 
         if mode == "arcface" and src is not None:
-            # Full 5-point arcface alignment (experimental: this model was
-            # trained on box-centre crops, so 'roll' is the safer default).
             ratio = INPUT_SIZE / 112.0
             dst = _ARCFACE_DST * ratio
             diff = 8.0 * ratio
@@ -99,8 +93,6 @@ class AgeGender:
                     frame, matrix, (INPUT_SIZE, INPUT_SIZE), borderValue=0.0)
 
         if mode == "roll" and src is not None:
-            # Keep the official 1.5x framing but level the eye line, so a
-            # tilted head does not change the predicted age/gender.
             le, re = src[0], src[1]
             if abs(re[0] - le[0]) > 1.0:
                 roll = math.degrees(math.atan2(
@@ -114,7 +106,6 @@ class AgeGender:
                         frame, matrix, (INPUT_SIZE, INPUT_SIZE),
                         borderValue=0.0)
 
-        # Default / fallback: InsightFace Attribute.get box-centre transform.
         matrix = np.asarray([
             [scale, 0.0, INPUT_SIZE / 2.0 - cx * scale],
             [0.0, scale, INPUT_SIZE / 2.0 - cy * scale],
@@ -129,8 +120,6 @@ class AgeGender:
         if x2 - x1 < 1 or y2 - y1 < 1:
             return None
         aligned = cls._crop(frame, face, mode)
-        # The official ONNX graph contains its own -127.5 / 128 normalization.
-        # Feed raw RGB pixels, exactly as InsightFace's Attribute.get does.
         blob = cv2.dnn.blobFromImage(
             aligned, scalefactor=1.0, size=(INPUT_SIZE, INPUT_SIZE),
             mean=(0, 0, 0), swapRB=True,
@@ -143,8 +132,6 @@ class AgeGender:
             return face
         sharp = self._sharpness(frame, face["box"])
         face["sharpness"] = round(sharp, 1)
-        # Motion blur: no fresh guess. The smoother keeps this person's last
-        # value instead of locking a wrong age/gender from a blurred crop.
         if self.blur_thr > 0 and sharp < self.blur_thr:
             face.update({"gender": "Unknown", "gconf": 0.0, "age": 0,
                          "blurry": True})
@@ -157,7 +144,6 @@ class AgeGender:
         started = time.perf_counter()
         try:
             if self.rknn is not None:
-                # blob already (1,3,96,96); reorder axes on the 4D array.
                 nhwc = np.ascontiguousarray(
                     np.transpose(blob, (0, 2, 3, 1)), dtype=np.float32)
                 try:
@@ -179,10 +165,8 @@ class AgeGender:
             probs = np.exp(logits)
             probs /= max(float(np.sum(probs)), 1e-12)
             gender_id = int(np.argmax(probs))
-            # InsightFace GenderAge: 0 = female, 1 = male; age is scaled by 100.
             gender = "Male" if gender_id == 1 else "Female"
             raw_age = float(values[2]) * 100.0
-            # Optional linear correction: AGE_SCALE * raw + AGE_BIAS.
             age = int(np.clip(np.rint(raw_age * self.age_scale + self.age_bias),
                               0, 120))
             face.update({

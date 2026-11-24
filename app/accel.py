@@ -1,9 +1,3 @@
-"""Detect Rockchip NPU character devices and DRM render-node drivers.
-
-On some Rockchip Ubuntu images, RKNPU is exposed as a DRM node such as
-/dev/dri/renderD129 instead of /dev/rknpu. Read the sysfs driver link so the
-health endpoint does not mistake every render node for a GPU.
-"""
 import glob
 import os
 
@@ -11,7 +5,6 @@ import numpy as np
 
 RENDER_GLOB = "/dev/dri/renderD*"
 RKNPU_GLOB = "/dev/rknpu*"
-# user er deoa explicit path (compose e mount hoy)
 EXPLICIT_RENDER = "/dev/dri/renderD129"
 
 
@@ -24,7 +17,6 @@ def rknpu_devices() -> list:
 
 
 def dri_driver_map() -> dict:
-    """Map each DRM render node to its kernel driver when sysfs exposes it."""
     result = {}
     for path in dri_devices():
         node = os.path.basename(path)
@@ -57,7 +49,6 @@ def hw_summary() -> dict:
 
 
 def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
-    """Read the layout the RKNN runtime was actually compiled for."""
     try:
         details = rknn.get_input_details()
         if details and index < len(details):
@@ -70,7 +61,6 @@ def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
 
 
 def _as_4d(blob: np.ndarray, layout: str) -> np.ndarray:
-    """RKNN requires a batch dimension; a bare HWC/NCHW array is rejected."""
     if blob.ndim == 3:
         return np.ascontiguousarray(blob[np.newaxis, ...])
     return blob
@@ -87,21 +77,12 @@ def _reorder(blob: np.ndarray, src: str, dst: str) -> np.ndarray:
 
 
 def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
-    """Run RKNNLite.inference with an explicit 4D input layout.
-
-    Lite2 defaults data_format to NHWC when it is omitted. That silently
-    misreads an NCHW float blob as (N=1, H=3, W=H, C=W) and produces garbage
-    detections (typically everything becomes COCO 'person'). These RK3576
-    models are compiled for NHWC, so normalize every call to the runtime's
-    reported layout and never send a 3D array.
-    """
     blob = _as_4d(blob, layout)
     runtime_layout, runtime_shape = _runtime_input_layout(rknn)
     if runtime_layout in ("nchw", "nhwc"):
         blob = _reorder(blob, layout, runtime_layout)
         layout = runtime_layout
     elif len(runtime_shape) == 4:
-        # Some Lite releases omit 'layout' but still expose the shape.
         if runtime_shape[-1] in (1, 3, 4) and blob.shape[1] in (1, 3, 4) \
                 and blob.shape[-1] not in (1, 3, 4):
             blob = _reorder(blob, "nchw", "nhwc")
@@ -119,8 +100,6 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
     except TypeError:
         return rknn.inference(inputs=[blob])
     except Exception as exc:
-        # get_input_details() kono samoy compiled layout na janale other layout
-        # ekbar try koro. Batch dim thaklei 4D requirement fulfillment hoy.
         other = "nhwc" if layout == "nchw" else "nchw"
         if blob.ndim == 4 and blob.shape[0] == 1:
             retry_blob = _reorder(blob, layout, other)
@@ -136,7 +115,6 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
 
 
 def rknn_input_summary(rknn) -> dict:
-    """Best-effort model input descriptor, used for startup diagnostics."""
     try:
         details = rknn.get_input_details()
         if not details:
@@ -152,7 +130,6 @@ def rknn_input_summary(rknn) -> dict:
 
 
 def rknn_load(path: str, label: str = "model") -> tuple:
-    """Load + init an RKNN model on NPU. No ONNX/CPU fallback, ever."""
     if not path or not os.path.isfile(path):
         raise FileNotFoundError(
             f"[{label}] RKNN model missing: {path} — CPU fallback disabled")

@@ -1,4 +1,3 @@
-"""FastAPI app: localhost URL e live MJPEG + Human/Face/Gender label."""
 import os
 import threading
 import time
@@ -13,23 +12,20 @@ from .detector import HumanDetector
 
 MODEL_NAME = os.getenv("MODEL_NAME", "models/yolo11n.pt")
 CONF = float(os.getenv("CONF_THRESHOLD", "0.5"))
-IMGSZ = int(os.getenv("IMG_SIZE", "320"))  # LAG FIX: 384->320 default (CPU ~40% fast)
-JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))  # 70->60: encode fast + bandwidth kom
+IMGSZ = int(os.getenv("IMG_SIZE", "320"))
+JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))
 STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
-WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
+WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
-FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face-e age/gender skip
+FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
 
-# NPU-only mode: torch/onnxruntime load kora hoy na.
-# OpenCV pre/post-processing thread count bound rakho.
 try:
     cv2.setNumThreads(max(1, min(4, int(os.getenv("CV_THREADS", "4")))))
 except Exception:
     pass
-# NPU/GPU info: /dev/dri/renderD129 (Mali) + /dev/rknpu (NPU) detect + log
 try:
     from .accel import hw_summary
     _HW = hw_summary()
@@ -61,9 +57,6 @@ def apply_flip(frame):
     return frame
 
 
-# ---- Background inference: stream kokhono infer er jonno block hobe na.
-# Infer thread latest frame e detection chaliye result ready rakhe,
-# gen_frames sudhu ready image serve kore (~30fps, lag-free).
 _out_lock = threading.Lock()
 _latest_annotated: np.ndarray | None = None
 _infer_fps = 0.0
@@ -82,8 +75,6 @@ def _infer_loop():
             _infer_fps = _infer_fps * 0.9 + inst * 0.1
             with _out_lock:
                 _latest_annotated = annotated
-            # LAG FIX: tight loop e CPU 100% kheye stream thread ke starve
-            # korto. choto yield — infer fps kome na, stream smooth hoy.
             time.sleep(0.005)
         except Exception as e:
             print(f"[infer] {e}")
@@ -253,20 +244,17 @@ def gen_frames():
     interval = 1.0 / max(1.0, STREAM_FPS)
     while True:
         t0 = time.time()
-        # LAG FIX: lock er ভিতরে copy() korle infer thread block hoto.
-        # age reference nao, lock charo, tarpor copy.
         with _out_lock:
             ref = _latest_annotated
         img = ref.copy() if ref is not None else None
         if img is None:
-            img = apply_flip(camera.read())  # infer ready howar age raw
+            img = apply_flip(camera.read())
         ok, buf = cv2.imencode(".jpg", img,
                                [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_Q])
         if not ok:
             continue
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                + buf.tobytes() + b"\r\n")
-        # fixed 33ms na — STREAM_FPS onujayi, encode time bad diye
         dt = time.time() - t0
         time.sleep(max(0.0, interval - dt))
 

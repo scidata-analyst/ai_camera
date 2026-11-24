@@ -1,4 +1,3 @@
-"""Threaded camera reader with /dev/video0 + fallback."""
 import os
 import threading
 import time
@@ -9,7 +8,6 @@ import numpy as np
 
 class CameraStream:
     def __init__(self, source=None, width: int = 640, height: int = 480):
-        # CAMERA_SOURCE env: "0" / "/dev/video0" / rtsp url / video file
         src = source or os.getenv("CAMERA_SOURCE", "0")
         if isinstance(src, str) and src.isdigit():
             src = int(src)
@@ -24,7 +22,6 @@ class CameraStream:
         self._connect()
 
     def _connect(self):
-        # purono cap release na kore re-connect korle fd leak hoto
         try:
             if self.cap is not None:
                 self.cap.release()
@@ -32,8 +29,6 @@ class CameraStream:
             pass
         self.cap = cv2.VideoCapture(self.source)
         if self.cap.isOpened():
-            # LAG FIX: buffer=1 + MJPG -> purono frame jome lag hoy na,
-            # sobsomoy latest frame ase. MJPG decode o fast.
             try:
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
@@ -60,7 +55,6 @@ class CameraStream:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _synthetic(self) -> np.ndarray:
-        """Camera na thakle test pattern, jate localhost URL sobsomoy open hoy."""
         img = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         t = int(time.time() * 2) % self.width
         cv2.rectangle(img, (t - 80, 100), (t, 300), (255, 255, 255), -1)
@@ -77,11 +71,8 @@ class CameraStream:
                 if ok and f is not None:
                     with self.lock:
                         self.frame = f
-                    # LAG FIX: camera thread CPU na khak — choto sleep,
-                    # infer/stream thread ke GIL charo
                     time.sleep(0.005)
                 else:
-                    # camera drop -> reconnect once
                     self.connected = False
                     time.sleep(0.5)
                     self._connect()

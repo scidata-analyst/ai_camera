@@ -1,10 +1,3 @@
-"""WHENet head pose (yaw/pitch/roll) + looking-at-camera — RK3576 friendly.
-
-Model: PINTO0309 whenet_1x3x224x224_prepost.onnx (~17MB, pre+post inside)
-Input : face crop (BGR) -> 224x224 RGB raw 0-255 NCHW (norm model er ভিতরে)
-Output: [yaw, roll, pitch] degree (-180..180)
-looking = |yaw|<=LOOK_YAW and |pitch|<=LOOK_PITCH
-"""
 import os
 import urllib.request
 
@@ -40,11 +33,9 @@ class HeadPoseEstimator:
         self.backend = "off"
         self.input_name = None
         self.providers = ["CPUExecutionProvider"]
-        # bg worker cache: infer loop instant fill, worker refresh kore.
-        # HEADPOSE_TTL sec porjonto ager yaw/pitch reuse (0ms, block na).
         import threading as _th
         self._clock = _th.RLock()
-        self._cache = []  # {box, yaw, pitch, roll, looking, t}
+        self._cache = []
         self._ttl = float(os.getenv("HEADPOSE_TTL", "1.0"))
         self._iou_thr = 0.4
         if not self.enabled:
@@ -68,12 +59,10 @@ class HeadPoseEstimator:
 
     def _infer(self, batch: np.ndarray) -> np.ndarray:
         if self.rknn is not None:
-            # batch = (1,3,224,224); reorder on 4D, then submit one at a time.
             nhwc = np.ascontiguousarray(
                 np.transpose(batch, (0, 2, 3, 1)), dtype=np.float32)
             rows = []
             for sample in nhwc:
-                # sample = (224,224,3); RKNN wants (1,224,224,3).
                 blob = sample[np.newaxis, ...]
                 try:
                     from .accel import rknn_infer
@@ -90,10 +79,9 @@ class HeadPoseEstimator:
         img = cv2.resize(crop, (IN_SIZE, IN_SIZE))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = np.transpose(img, (2, 0, 1))[np.newaxis, ...]
-        return img.astype(np.float32)  # 0-255 raw, norm model er ভিতরে
+        return img.astype(np.float32)
 
     def predict_crop(self, crop: np.ndarray):
-        """-> (yaw, pitch, roll) degree."""
         blob = self._preprocess(crop)
         out = self._infer(blob)[0]
         yaw, roll, pitch = float(out[0]), float(out[1]), float(out[2])
@@ -110,7 +98,6 @@ class HeadPoseEstimator:
         return inter / max(area - inter, 1e-6)
 
     def remember(self, faces):
-        """Worker er fresh result cache e rakho (bounded, thread-safe)."""
         import time
         now = time.time()
         with self._clock:
@@ -133,7 +120,6 @@ class HeadPoseEstimator:
         return faces
 
     def fill_from_cache(self, faces):
-        """Infer loop theke instant fill (<1ms, block na)."""
         if not self.loaded:
             return faces
         import time
@@ -154,12 +140,9 @@ class HeadPoseEstimator:
         return faces
 
     def predict_frame(self, frame: np.ndarray, faces, min_side: int = 40):
-        """faces e yaw/pitch/roll/looking bosiye dey (in-place)."""
         if not self.loaded:
             return faces
         H, W = frame.shape[:2]
-        # LAG FIX: per-face run() er bodle 1 batch e chalao.
-        # 3 face hole 3x session.run overhead -> 1x hoy.
         blobs, idxs = [], []
         crops_meta = []
         for i, fc in enumerate(faces):
@@ -169,7 +152,6 @@ class HeadPoseEstimator:
                 fc.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
                            "looking": False})
                 continue
-            # margin soho crop (PINTO demo style)
             xa = max(int(x1 - w / 5), 0)
             xb = min(int(x2 + w / 5), W)
             ya = max(int(y1 - h / 10), 0)

@@ -1,4 +1,3 @@
-"""Human-only detector: YOLO 'person' class + RetinaFace, no non-human output."""
 import os
 import threading
 import time
@@ -7,7 +6,6 @@ from typing import List, Dict
 import cv2
 import numpy as np
 
-# LAG FIX: CPU thread fight komao (torch + onnx + cv2)
 try:
     _NTH = int(os.getenv("TORCH_THREADS", str(min(4, (os.cpu_count() or 4)))))
     cv2.setNumThreads(max(1, min(4, _NTH)))
@@ -21,7 +19,6 @@ from .headpose import HeadPoseEstimator
 
 
 class _RknnBox:
-    """Ultralytics box adapter: box.cls[0] / box.conf[0] / box.xyxy[0]."""
     def __init__(self, cls_id: int, conf: float, xyxy):
         self.cls = np.array([cls_id], dtype=np.float32)
         self.conf = np.array([conf], dtype=np.float32)
@@ -34,7 +31,6 @@ class _RknnResult:
 
 
 class HumanDetector:
-    """YOLO humans/objects + RetinaFace + age/gender + WHENet head pose."""
 
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
                  window_sec: float = 1.0, face_enable: bool = True,
@@ -43,7 +39,6 @@ class HumanDetector:
         self.imgsz = imgsz
         self.model_name = model_name
         self.face_min_size = int(face_min_size)
-        # NPU-only: CPU/auto/ONNX fallback removed. Missing RKNN => fail fast.
         self.backend = os.getenv("YOLO_BACKEND", "rknn").lower()
         if self.backend not in ("rknn", ""):
             raise RuntimeError(
@@ -51,7 +46,6 @@ class HumanDetector:
         self.backend = "rknn"
         self.rknn_path = os.getenv("RKNN_MODEL", "/app/models/yolo11n-rk3576.rknn")
         self.model = None
-        # NPU device log: /dev/rknpu (NPU) + /dev/dri/renderD129 (Mali GPU)
         try:
             from .accel import hw_summary
             print(f"[hw] {hw_summary()} rknn_model={self.rknn_path} "
@@ -90,35 +84,22 @@ class HumanDetector:
         self.headpose_enabled = self.headpose is not None and self.headpose.loaded
         self.smoother = CountSmoother(window_sec=window_sec)
         self.smoothed = self.smoother.current
-        # 1-sec window-e sob face-er age/gender prediction average kore dey.
         self.attr_smoother = FaceAttributeSmoother(window_sec=window_sec)
         self._t_prev = time.time()
         self._fps_smooth = 0.0
-        # LAG FIX: YOLO proti frame e na chaliye reuse koro.
-        # DETECT_EVERY=2 mane 2 bar er moddhe 1 bar YOLO, majhe box reuse.
-        # RK3576 CPU te ~2x infer fps bare.
         self.detect_every = max(1, int(os.getenv("DETECT_EVERY", "2")))
-        # 0 = no cap. Frame-e joto face thakbe sob process korbo.
         self.max_faces = max(0, int(os.getenv("MAX_FACES", "0")))
-        # False-positive guard: a 'person' box must clear its own threshold.
-        # Objects misread as person usually sit between 0.5 and 0.65.
         self.person_conf = float(os.getenv("PERSON_CONF", "0.65"))
         self.person_min_h = int(os.getenv("PERSON_MIN_H", "0"))
         self.person_require_face = os.getenv("PERSON_REQUIRE_FACE", "0") == "1"
-        # Never reuse a stale box longer than this (seconds).
         self.det_stale_sec = float(os.getenv("DET_STALE_SEC", "0.2"))
         self._last_dets_t = 0.0
         self._debug = os.getenv("YOLO_DEBUG", "0") == "1"
-        # SPEED: RetinaFace proti infer e na chaliye N bar por por (box reuse).
-        # FACE_EVERY=2 mane YOLO skip er sathe face o half rate -> CPU ~30% save.
         self.face_every = max(1, int(os.getenv("FACE_EVERY", "2")))
         self._face_no = 0
         self._last_faces_cache = []
-        # Age/gender is a tiny single-face model and runs alongside face detect.
-        # Head-pose remains on a latest-only worker so it cannot stall the stream.
         self._hp_lock = threading.Lock()
         self._hp_pending = None
-        # Diagnose stage latency through /api/stats.
         self._bg_last_ms = 0.0
         self.timing = {"yolo_ms": 0.0, "face_ms": 0.0, "age_gender_ms": 0.0,
                        "infer_ms": 0.0}
@@ -128,7 +109,6 @@ class HumanDetector:
         self._last_dets: List[Dict] = []
 
     def _headpose_submit(self, frame: np.ndarray, faces):
-        """Keep only the newest head-pose job; stale frames are discarded."""
         if self.headpose is None or not faces:
             return
         fcs = [{"box": list(f["box"]), "landmarks": f.get("landmarks"),
@@ -138,7 +118,6 @@ class HumanDetector:
             self._hp_pending = (frame.copy(), fcs)
 
     def _bg_loop(self):
-        """Run only WHENet head pose on the newest face set."""
         while True:
             try:
                 with self._hp_lock:
@@ -165,10 +144,8 @@ class HumanDetector:
             raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
         return self._run_rknn(frame)
 
-    # ---------- RK3576 NPU (RKNNLite) path ----------
     @staticmethod
     def _letterbox(img: np.ndarray, size: int):
-        """Ultralytics-style letterbox -> square size x size + undo params."""
         h, w = img.shape[:2]
         r = min(size / h, size / w)
         nh, nw = int(round(h * r)), int(round(w * r))
@@ -180,15 +157,11 @@ class HumanDetector:
         return out, r, left, top
 
     def _run_rknn(self, frame: np.ndarray):
-        """NPU infer + class-wise NMS. Output shape auto-handle (84xN / Nx84)."""
         import numpy as _np
         from .accel import rknn_infer
         H, W = frame.shape[:2]
         img, ratio, pad_x, pad_y = self._letterbox(frame, self.imgsz)
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(_np.float32) / 255.0
-        # Model er compiled input NHWC/FLOAT16. Ekhon 4D NHWC pathai — age
-        # NCHW pathailo Lite2 image-ke ulto-pulte podhe, class score garbage
-        # hoto ar sob kichu 'person' dekha jeto.
         nhwc = _np.ascontiguousarray(rgb[_np.newaxis, ...], dtype=_np.float32)
         with self._lock:
             outs = rknn_infer(self.rknn, nhwc, "nhwc", "float32")
@@ -211,15 +184,11 @@ class HumanDetector:
                 self._rknn_warned = True
             return _RknnResult([])
         if pred.shape[1] == 84:
-            pred = _np.transpose(pred[0], (1, 0))  # (N,84)
+            pred = _np.transpose(pred[0], (1, 0))
         else:
-            pred = pred[0]  # (N,84)
+            pred = pred[0]
         boxes_cxcywh = pred[:, :4]
-        # Ultralytics YOLO11 export already applies sigmoid to class scores.
-        # Applying it again would inflate every confidence to >= 0.5.
         scores = pred[:, 4:]
-        # Strict human-only: COCO class 0 = 'person'. Other class-er score
-        # dekheo detect korbo na, label-o dekhabo na.
         person_scores = scores[:, 0]
         if self._debug and not getattr(self, "_rknn_debug_done", False):
             self._rknn_debug_done = True
@@ -231,22 +200,18 @@ class HumanDetector:
         cls_ids = _np.zeros(len(confs), dtype=_np.int64)
         if len(confs) == 0:
             return _RknnResult([])
-        # letterbox undo -> original frame coords
         cx, cy, bw, bh = boxes_cxcywh.T
         x1 = ((cx - bw / 2 - pad_x) / ratio).clip(0, W)
         y1 = ((cy - bh / 2 - pad_y) / ratio).clip(0, H)
         x2 = ((cx + bw / 2 - pad_x) / ratio).clip(0, W)
         y2 = ((cy + bh / 2 - pad_y) / ratio).clip(0, H)
         ltrb = _np.stack([x1, y1, x2, y2], axis=1).tolist()
-        # OpenCV NMSBoxes expects [x, y, width, height], while ltrb is
-        # [x1, y1, x2, y2]. Passing ltrb directly corrupts overlap tests.
         nms_boxes = [
             [int(box[0]), int(box[1]),
              max(1, int(box[2] - box[0])),
              max(1, int(box[3] - box[1]))]
             for box in ltrb
         ]
-        # Class-wise NMS: ek class-er box onno class-er box diye chapai jay na.
         kept: set[int] = set()
         for cid in _np.unique(cls_ids):
             ix = _np.flatnonzero(cls_ids == cid)
@@ -258,7 +223,6 @@ class HumanDetector:
             except Exception:
                 picked = list(range(len(ix)))
             kept.update(int(ix[p]) for p in picked)
-        # Kono count cap nai — frame-e joto object thakbe sob return korbo.
         kept = sorted(kept, key=lambda i: -float(confs[i]))
         out = [_RknnBox(int(cls_ids[i]), float(confs[i]),
                         [int(ltrb[i][0]), int(ltrb[i][1]),
@@ -267,19 +231,10 @@ class HumanDetector:
         return _RknnResult(out)
 
     def infer(self, frame: np.ndarray) -> tuple[np.ndarray, List[Dict]]:
-        """Run detection, draw boxes, return (annotated_frame, detections)."""
-        # Keep model inputs free of the boxes/labels drawn below. In particular,
-        # face alignment and age/gender inference are sensitive to overlays.
         source_frame = frame.copy()
         self._frame_no += 1
         _t_all = time.perf_counter()
-        # LAG FIX: proti N frame e 1 bar YOLO, majhe ager box reuse.
-        # Face/RetinaFace periodically runs while YOLO boxes are reused.
-        # Phase stagger: YOLO even frame e, face detector odd frame e — vari 2 kaj
-        # eki frame e porle spike hoto. (==0 phase, EVERY=1 eo thik chole;
-        # ager ==1 logic e EVERY=1 dile kokhono re-run hoto na.)
         run_yolo = (self._frame_no % self.detect_every == 0) or not self._last_dets
-        # Purono box beshi din reuse korle camera naoleo 'human' dekha jay.
         if not run_yolo and self._last_dets_t and \
                 time.time() - self._last_dets_t > self.det_stale_sec:
             self._last_dets = []
@@ -288,7 +243,6 @@ class HumanDetector:
         detections: List[Dict] = []
 
         def _keep(d: Dict) -> bool:
-            """Strict human-only: non-human kisui passe na."""
             if d["kind"] != "human":
                 return False
             x1, y1, x2, y2 = d["box"]
@@ -303,7 +257,7 @@ class HumanDetector:
             for box in results.boxes:
                 cls_id = int(box.cls[0])
                 if cls_id != 0:
-                    continue  # strictly human-only
+                    continue
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 d = {"kind": "human", "class": "person",
@@ -315,13 +269,10 @@ class HumanDetector:
         else:
             detections = [dict(d) for d in self._last_dets if _keep(d)]
 
-        # RetinaFace finds faces; the small age/gender head predicts inline.
-        # FACE_EVERY controls whether the previous face results are reused.
         faces = []
         if self.face is not None:
             try:
                 self._face_no += 1
-                # YOLO phase 0 (even), face phase (EVERY-1, odd) — spike vag hoy
                 run_face = (self._face_no % self.face_every == self.face_every - 1) \
                     or not self._last_faces_cache
                 if run_face:
@@ -329,7 +280,6 @@ class HumanDetector:
                     faces = self.face.detect(source_frame)
                     self.timing["face_ms"] = round(
                         (time.perf_counter() - _t0) * 1000, 1)
-                    # MAX_FACES=0 (default) means no cap; >0 only if explicitly set.
                     if self.max_faces > 0 and len(faces) > self.max_faces:
                         faces = sorted(
                             faces,
@@ -347,7 +297,6 @@ class HumanDetector:
                                 self.age_gender.predict(source_frame, face)
                     self.timing["age_gender_ms"] = round(
                         (time.perf_counter() - _t1) * 1000, 1)
-                    # 1-sec window-e sob fresh prediction joma koro.
                     self.attr_smoother.add(faces)
                     if self.headpose is not None:
                         faces = self.headpose.fill_from_cache(faces)
@@ -355,15 +304,12 @@ class HumanDetector:
                     self._last_faces_cache = [dict(f) for f in faces]
                 else:
                     faces = [dict(f) for f in self._last_faces_cache]
-                # 1-sec average age/gender, sticky label (no flicker/disappear).
                 self.attr_smoother.fill(faces)
                 RetinaFace.draw(frame, faces)
             except Exception as e:
                 print(f"[face] infer fail: {e}")
                 faces = []
 
-        # Optional cross-check: PERSON_REQUIRE_FACE=1 mantre face na thaka
-        # 'human' box gulo bade dewa hoy (chairs/bags ke human bananor roodh).
         if self.person_require_face:
             def _has_face(d: Dict) -> bool:
                 x1, y1, x2, y2 = d["box"]
@@ -376,11 +322,9 @@ class HumanDetector:
                 self._last_dets = [dict(d) for d in detections]
 
         human_n = sum(1 for d in detections if d["kind"] == "human")
-        # Non-human detect/label — duto-i choles na.
         non_human_n = 0
 
         def _face_for_human(d: Dict):
-            """Human box-er sathe sobar beshi overlap kora face khujo."""
             x1, y1, x2, y2 = d["box"]
             best, best_iou = None, 0.0
             human_area = max(1, (x2 - x1) * (y2 - y1))
@@ -396,7 +340,6 @@ class HumanDetector:
                     best, best_iou = f, iou
             return best
 
-        # Boxes draw kora hoy face/check-er por, jate bade dewa box dekha na jay.
         for d in detections:
             if d["kind"] != "human":
                 continue
@@ -407,9 +350,8 @@ class HumanDetector:
             if gender not in (None, "", "Unknown") and age:
                 label = f"Human {gender} {age}y {d['conf']:.2f}"
             else:
-                # Age/gender na thakle 'Unknown' dekhabo na.
                 label = f"Human {d['conf']:.2f}"
-            color = (0, 255, 0)  # green
+            color = (0, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
@@ -422,7 +364,6 @@ class HumanDetector:
         look_n = sum(1 for f in faces if f.get("looking"))
         self.last_faces = faces
 
-        # FPS + 1-sec smoothed header (mean/median/mode)
         now = time.time()
         inst = 1.0 / max(now - self._t_prev, 1e-6)
         self._t_prev = now

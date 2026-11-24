@@ -1,11 +1,3 @@
-"""Manually convert the RetinaFace and InsightFace GenderAge ONNX models.
-
-Run on an x86_64 Linux machine with RKNN-Toolkit2 installed:
-    python tools/export_face_models_rknn.py --target rk3576
-
-Compose does not invoke this exporter. Both models are exported as FP32 to
-avoid introducing INT8 calibration error into face/attribute predictions.
-"""
 from __future__ import annotations
 
 import argparse
@@ -30,8 +22,6 @@ def convert(model: Path, output: Path, target: str,
             std_values=std_values,
         )
         if input_name and input_size:
-            # GenderAge ONNX leaves the batch dimension dynamic. Its runtime
-            # contract is a single NCHW face crop, so fix batch=1 for RKNN.
             ret = rknn.load_onnx(
                 model=str(model), inputs=[input_name],
                 input_size_list=[list(input_size)],
@@ -67,16 +57,12 @@ def main() -> None:
     if not retinaface.is_file() or not genderage.is_file():
         raise SystemExit("Missing ONNX files in models/. Download them first.")
 
-    # Match the official RKNN Model Zoo RetinaFace conversion contract:
-    # the app supplies a 320x320 RGB uint8 image.
     convert(
         retinaface,
         ROOT / "models/RetinaFace_mobile320-rk3576.rknn",
         args.target, [[104, 117, 123]], [[1, 1, 1]],
     )
 
-    # GenderAge's official ONNX graph already contains pixel normalization;
-    # the app supplies its aligned 96x96 RGB crop as raw 0..255 float32.
     convert(
         genderage,
         ROOT / "models/genderage-rk3576.rknn",

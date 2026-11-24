@@ -1,19 +1,3 @@
-"""yolo11n.pt -> RK3576 .rknn (NPU model) export.
-
-PC (x86) te chalao — rknn-toolkit2 conversion x86 te supported,
-cholbe sudhu board e (RKNNLite + /dev/rknpu).
-Output: models/yolo11n-rk3576.rknn (compose er RKNN_MODEL er sathe mile)
-
-Usage:
-  pip install rknn-toolkit2 ultralytics onnx
-  python tools/export_rknn.py                          # fp (default, safe)
-  python tools/export_rknn.py --quant i8 --dataset ./calib.txt --imgsz 320
-  python tools/export_rknn.py --model yolo11s.pt --imgsz 480
-
-Note (app/app/detector.py _run_rknn er sathe contract):
-  - input : NCHW RGB float32 0-1, square imgsz (letterbox app code e hoy)
-  - output: (1,84,N) decoded boxes + sigmoid class probabilities — COCO 80 class
-"""
 import argparse
 import os
 import shutil
@@ -22,13 +6,11 @@ import shutil
 def export_onnx(pt: str, imgsz: int, workdir: str) -> str:
     from ultralytics import YOLO
     print(f"[export] pt -> onnx: {pt} imgsz={imgsz}")
-    # dynamic=False: static (1,3,H,W) — RKNN convert stable hoy
     out = YOLO(pt).export(format="onnx", imgsz=imgsz, opset=12,
                           simplify=True, dynamic=False)
     dst = os.path.join(workdir, "yolo11n.onnx")
     if os.path.abspath(out) != os.path.abspath(dst):
         shutil.move(out, dst)
-    # ultralytics .cache dir poriskar (repo nogra hoy na)
     for p in (os.path.splitext(pt)[0] + ".cache",):
         if os.path.exists(p):
             os.remove(p)
@@ -45,11 +27,8 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int,
                          "(proti line e 1ta jpg path)")
     print(f"[export] onnx -> rknn: target={target} quant={'i8' if do_quant else 'fp'}")
     rknn = RKNN(verbose=True)
-    # mean/std: app code already /255 float32 pathay, tai norm off (std=1)
     rknn.config(target_platform=target,
                 mean_values=[[0, 0, 0]], std_values=[[1, 1, 1]])
-    # Ultralytics exports a fixed NCHW input shape. Let Toolkit2 read it from
-    # ONNX metadata; its crop/input overrides can reinterpret NCHW dimensions.
     ret = rknn.load_onnx(model=onnx_path)
     if ret != 0:
         raise SystemExit(f"[export] load_onnx fail ret={ret}")

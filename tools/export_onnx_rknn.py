@@ -1,8 +1,3 @@
-"""Convert a fixed-shape ONNX model to RK3576 RKNN without quantization.
-
-Usage:
-    python tools/export_onnx_rknn.py --model models/whenet.onnx
-"""
 from __future__ import annotations
 
 import argparse
@@ -30,7 +25,6 @@ def main() -> None:
     rknn = RKNN(verbose=True)
     try:
         rknn.config(target_platform=args.target)
-        # Read fixed input dimensions and output names from the ONNX metadata.
         ret = rknn.load_onnx(model=str(model))
         if ret != 0:
             raise RuntimeError(f"load_onnx failed: {ret}")
