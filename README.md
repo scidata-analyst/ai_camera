@@ -9,6 +9,29 @@ Camera stream-er pipeline:
 
 RetinaFace is the face detector. Age and gender come from the separate, lightweight `genderage.onnx` head. MiVOLO is removed.
 
+## Code structure
+
+The pipeline follows a domain-driven layout:
+
+| Folder | Responsibility |
+| --- | --- |
+| `app/config/` | Environment settings and shared constants |
+| `app/domain/detection/` | Human detection port and filtering service |
+| `app/domain/face/` | Face detection service and blur/size quality gate |
+| `app/domain/age/` | Raw age decoding and `AGE_SCALE`/`AGE_BIAS` calibration |
+| `app/domain/gender/` | Gender softmax/argmax decoding |
+| `app/domain/attributes/` | Shared age/gender estimator port |
+| `app/domain/aggregation/` | Mean/median/mode window and per-person attribute smoothing |
+| `app/domain/headpose/` | Head-pose analyzer port |
+| `app/application/` | Frame processor and cross-domain orchestration |
+| `app/infrastructure/rknn/` | RKNN adapters for YOLO, RetinaFace, GenderAge and WHENet |
+| `app/infrastructure/camera/` | OpenCV frame source |
+| `app/infrastructure/rendering/` | OpenCV drawing/overlay renderer |
+| `app/interfaces/` | FastAPI controllers, presenters and flip state |
+| `app/main.py` | Composition root: wires settings, adapters, services and routers |
+
+All HTTP endpoints and JSON payload keys are unchanged; only the internal module layout was reorganized.
+
 ## Run
 
 ```bash

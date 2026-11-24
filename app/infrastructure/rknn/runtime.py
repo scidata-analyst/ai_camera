@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import glob
 import os
 
 import numpy as np
 
-RENDER_GLOB = "/dev/dri/renderD*"
-RKNPU_GLOB = "/dev/rknpu*"
-EXPLICIT_RENDER = "/dev/dri/renderD129"
+from ...config.constants import EXPLICIT_RENDER, RENDER_GLOB, RKNPU_GLOB
 
 
 def dri_devices() -> list:
@@ -43,7 +43,7 @@ def hw_summary() -> dict:
         "npu_dri": npu_dri,
         "rknpu": rknpu,
         "has_gpu": any(driver and any(g in driver.lower() for g in gpu_drivers)
-                        for driver in drivers.values()),
+                       for driver in drivers.values()),
         "has_npu": bool(rknpu or npu_dri),
     }
 
@@ -52,9 +52,9 @@ def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
     try:
         details = rknn.get_input_details()
         if details and index < len(details):
-            d = details[index]
-            return (str(d.get("layout", "")).lower(),
-                    tuple(int(v) for v in d.get("shape", ())))
+            detail = details[index]
+            return (str(detail.get("layout", "")).lower(),
+                    tuple(int(v) for v in detail.get("shape", ())))
     except Exception:
         pass
     return "", ()
@@ -92,11 +92,11 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
             blob = _reorder(blob, "nhwc", "nchw")
             layout = "nchw"
 
-    kw = {"inputs": [blob], "data_format": layout}
+    kwargs = {"inputs": [blob], "data_format": layout}
     if dtype:
-        kw["data_type"] = dtype
+        kwargs["data_type"] = dtype
     try:
-        return rknn.inference(**kw)
+        return rknn.inference(**kwargs)
     except TypeError:
         return rknn.inference(inputs=[blob])
     except Exception as exc:
@@ -119,11 +119,11 @@ def rknn_input_summary(rknn) -> dict:
         details = rknn.get_input_details()
         if not details:
             return {}
-        d = details[0]
+        detail = details[0]
         return {
-            "shape": tuple(int(v) for v in d.get("shape", ())),
-            "dtype": str(d.get("dtype", "")),
-            "layout": str(d.get("layout", "")).lower(),
+            "shape": tuple(int(v) for v in detail.get("shape", ())),
+            "dtype": str(detail.get("dtype", "")),
+            "layout": str(detail.get("layout", "")).lower(),
         }
     except Exception:
         return {}
@@ -140,13 +140,13 @@ def rknn_load(path: str, label: str = "model") -> tuple:
     if ret != 0:
         raise RuntimeError(f"[{label}] load_rknn failed: ret={ret}")
     core = os.getenv("RKNPU_CORE", "AUTO")
-    kw = {}
+    kwargs = {}
     if core.upper() not in ("AUTO", ""):
         try:
-            kw["core_mask"] = int(core)
+            kwargs["core_mask"] = int(core)
         except ValueError:
             pass
-    ret = rknn.init_runtime(**kw) if kw else rknn.init_runtime()
+    ret = rknn.init_runtime(**kwargs) if kwargs else rknn.init_runtime()
     if ret != 0:
         raise RuntimeError(f"[{label}] init_runtime failed: ret={ret}")
     return rknn, core

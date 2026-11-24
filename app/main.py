@@ -1,265 +1,87 @@
-import os
-import threading
-import time
-
 import cv2
-import numpy as np
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
 
-from .camera import CameraStream
-from .detector import HumanDetector
+from .application.attribute_recognition import AttributeRecognitionService
+from .application.frame_processor import FrameProcessor
+from .application.head_pose import HeadPoseService
+from .config.settings import Settings
+from .domain.aggregation.services import (
+    AttributeAggregator,
+    CountAggregator,
+)
+from .domain.age.services import AgeService
+from .domain.detection.services import HumanDetectionService
+from .domain.face.services import FaceDetectionService, FaceQualityService
+from .domain.gender.services import GenderService
+from .infrastructure.camera.opencv_camera import OpenCVCamera
+from .infrastructure.rendering.opencv_renderer import OpenCVFrameRenderer
+from .infrastructure.rknn.genderage_estimator import RknnGenderAgeEstimator
+from .infrastructure.rknn.retinaface_detector import RknnFaceDetector
+from .infrastructure.rknn.runtime import hw_summary
+from .infrastructure.rknn.whenet_estimator import RknnHeadPoseEstimator
+from .infrastructure.rknn.yolo_detector import RknnPersonDetector
+from .interfaces.controllers.api_controller import ApiController
+from .interfaces.controllers.stream_controller import StreamController
+from .interfaces.flip_state import FlipState
+from .interfaces.presenters.stats_presenter import StatsPresenter
 
-MODEL_NAME = os.getenv("MODEL_NAME", "models/yolo11n.pt")
-CONF = float(os.getenv("CONF_THRESHOLD", "0.5"))
-IMGSZ = int(os.getenv("IMG_SIZE", "320"))
-JPEG_Q = int(os.getenv("JPEG_QUALITY", "60"))
-STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
-WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))
-FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
-HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
-FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))
-FLIP_H = os.getenv("FLIP_H", "0") == "1"
-FLIP_V = os.getenv("FLIP_V", "0") == "1"
+settings = Settings.from_env()
 
 try:
-    cv2.setNumThreads(max(1, min(4, int(os.getenv("CV_THREADS", "4")))))
+    cv2.setNumThreads(max(1, min(4, settings.torch_threads)))
 except Exception:
     pass
 try:
-    from .accel import hw_summary
-    _HW = hw_summary()
-    print(f"[hw] {_HW}")
-except Exception as e:
-    _HW = {}
-    print(f"[hw] accel check skip: {e}")
+    cv2.setNumThreads(max(1, min(4, settings.cv_threads)))
+except Exception:
+    pass
+
+try:
+    hardware = hw_summary()
+    print(f"[hw] {hardware}")
+except Exception as exc:
+    hardware = {}
+    print(f"[hw] accel check skip: {exc}")
+
+camera = OpenCVCamera(settings.camera_source, settings.frame_width,
+                      settings.frame_height)
+person_detector = RknnPersonDetector(settings)
+face_detector = RknnFaceDetector(settings) if settings.face_enable else None
+face_loaded = (face_detector is not None and
+               face_detector.describe().get("loaded", False))
+estimator = (RknnGenderAgeEstimator(settings) if face_loaded else None)
+age_service = AgeService(settings.age_scale, settings.age_bias)
+gender_service = GenderService()
+quality = FaceQualityService(settings.face_blur)
+attribute_aggregator = AttributeAggregator(window_sec=settings.window_sec)
+attributes = (AttributeRecognitionService(
+    estimator, quality, age_service, gender_service, attribute_aggregator,
+    settings.face_min_size, settings.age_align) if estimator is not None
+    else None)
+headpose_adapter = (RknnHeadPoseEstimator(settings)
+                    if settings.headpose_enable and face_loaded else None)
+headpose = (HeadPoseService(headpose_adapter, True)
+            if headpose_adapter is not None else None)
+face_detection = (FaceDetectionService(
+    face_detector, settings.max_faces, settings.face_every,
+    attributes, headpose)
+    if face_detector is not None and attributes is not None else None)
+human_detection = HumanDetectionService(
+    person_detector, settings.conf, settings.person_min_h,
+    settings.person_require_face, settings.detect_every,
+    settings.det_stale_sec)
+count_aggregator = CountAggregator(settings.window_sec)
+renderer = OpenCVFrameRenderer()
+processor = FrameProcessor(human_detection, face_detection, attributes,
+                           headpose, count_aggregator, renderer)
+flip = FlipState(settings.flip_h, settings.flip_v)
+presenter = StatsPresenter(settings, camera, processor, flip, hardware)
+stream_controller = StreamController(camera, processor, settings, flip)
+api_controller = ApiController(presenter, flip)
 
 app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)")
+app.include_router(stream_controller.router)
+app.include_router(api_controller.router)
 
-camera = CameraStream()
-detector = HumanDetector(model_name=MODEL_NAME, conf=CONF, imgsz=IMGSZ,
-                         window_sec=WINDOW_SEC, face_enable=FACE_ENABLE,
-                         headpose_enable=HEADPOSE_ENABLE,
-                         face_min_size=FACE_MIN_SIZE)
 camera.start()
-
-_flip = {"h": FLIP_H, "v": FLIP_V}
-
-
-def apply_flip(frame):
-    h, v = _flip["h"], _flip["v"]
-    if h and v:
-        return cv2.flip(frame, -1)
-    if h:
-        return cv2.flip(frame, 1)
-    if v:
-        return cv2.flip(frame, 0)
-    return frame
-
-
-_out_lock = threading.Lock()
-_latest_annotated: np.ndarray | None = None
-_infer_fps = 0.0
-
-
-def _infer_loop():
-    global _latest_annotated, _infer_fps
-    t_prev = time.time()
-    while True:
-        try:
-            frame = apply_flip(camera.read())
-            annotated, _ = detector.infer(frame)
-            now = time.time()
-            inst = 1.0 / max(now - t_prev, 1e-6)
-            t_prev = now
-            _infer_fps = _infer_fps * 0.9 + inst * 0.1
-            with _out_lock:
-                _latest_annotated = annotated
-            time.sleep(0.005)
-        except Exception as e:
-            print(f"[infer] {e}")
-            time.sleep(0.2)
-
-
-threading.Thread(target=_infer_loop, daemon=True).start()
-
-HTML_PAGE = """
-<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AI Camera - Human + Face</title>
-<style>
-html,body{height:100%}
-body{background:#000;color:#eee;font-family:sans-serif;text-align:center;margin:0;
-     display:flex;flex-direction:column;height:100vh;overflow:hidden}
-header{padding:8px;background:#000;font-size:18px;flex:0 0 auto}
-img#vid{flex:1 1 auto;min-height:0;width:100vw;object-fit:contain;background:#000}
-.bar{flex:0 0 auto;padding:4px;font-size:13px}
-.panel{background:#1e1e1e;display:inline-block;padding:6px 14px;border-radius:8px}
-.panel b{color:#4fc3f7}
-.info{color:#aaa}
-a{color:#4fc3f7}
-button{margin:0 4px}
-</style></head>
-<body>
-<header>AI Camera - Human / Face / Age / Gender (YOLOv11n + RetinaFace)</header>
-<img id="vid" src="/video_feed" />
-<div class="bar"><span class="panel" id="s">loading stats... (1s update)</span></div>
-<div class="bar">
-<button onclick="setFlip('h')">Flip H: <span id="fh">-</span></button>
-<button onclick="setFlip('v')">Flip V: <span id="fv">-</span></button>
-<button onclick="resetFlip()">Reset</button>
-<span class="info">Green Human | Cyan Face | <b>Green [LOOK] = Looking</b> |
-<a href="/api/stats">stats</a> | <a href="/api/faces">faces</a> | <a href="/api/health">health</a></span>
-</div>
-<script>
-async function tick(){
-  try{
-    const r = await fetch('/api/stats'); const j = await r.json();
-    const s = j.smoothed;
-    document.getElementById('s').innerHTML =
-      `Stable(1s) <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
-      `M:${s.stable_male} W:${s.stable_female} Look:${j.instant.looking} | ` +
-      `infer:${j.infer_fps}fps age/gender:${j.age_gender.runs} ` +
-      `${j.age_gender.last_ms}ms`;
-    document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
-    document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';
-  }catch(e){}
-}
-async function setFlip(axis){
-  await fetch('/api/flip/toggle?axis='+axis, {method:'POST'});
-  tick();
-}
-async function resetFlip(){
-  await fetch('/api/flip/set?h=0&v=0', {method:'POST'});
-  tick();
-}
-setInterval(tick, 1000); tick();
-</script>
-</body></html>
-"""
-
-
-@app.get("/", response_class=HTMLResponse)
-def index():
-    return HTML_PAGE
-
-
-@app.get("/api/health")
-def health():
-    face_backend = getattr(getattr(detector, "face", None),
-                           "backend_used", "off")
-    age_gender = getattr(detector, "age_gender", None)
-    age_gender_backend = getattr(age_gender, "backend", "off")
-    headpose_backend = getattr(getattr(detector, "headpose", None),
-                               "backend", "off")
-    model_backends = {
-        "object_detection": getattr(detector, "backend", "cpu"),
-        "face_detection": face_backend,
-        "age_gender": age_gender_backend,
-        "head_pose": headpose_backend,
-    }
-    return {"status": "ok", "camera_connected": camera.connected,
-            "model": MODEL_NAME, "conf": CONF, "imgsz": IMGSZ,
-            "backend": getattr(detector, "backend", "cpu"),
-            "rknn_model": getattr(detector, "rknn_path", None),
-            "npu_active": getattr(detector, "rknn", None) is not None,
-            "model_backends": model_backends,
-            "all_models_npu_active": all(
-                backend == "rknn" for backend in model_backends.values()),
-            "hw": _HW,
-            "face_backend": face_backend,
-            "face_rknn_model": getattr(getattr(detector, "face", None),
-                                        "rknn_path", None),
-            "headpose_backend": headpose_backend,
-            "headpose_rknn_model": getattr(getattr(detector, "headpose", None),
-                                            "rknn_path", None),
-            "headpose_providers": getattr(getattr(detector, "headpose", None),
-                                          "providers", []),
-            "face_enabled": FACE_ENABLE,
-            "face_loaded": detector.face_enabled,
-            "face_min_size": FACE_MIN_SIZE,
-            "age_gender_enabled": detector.age_gender is not None,
-            "age_gender_loaded": detector.age_gender_enabled,
-            "age_gender_backend": age_gender_backend,
-            "age_gender_model": getattr(age_gender, "onnx_path", None),
-            "age_gender_rknn_model": getattr(age_gender, "rknn_path", None),
-            "age_gender_align": getattr(age_gender, "align_mode", None),
-            "face_blur_min": getattr(age_gender, "blur_thr", None),
-            "age_calibration": {
-                "scale": getattr(age_gender, "age_scale", None),
-                "bias": getattr(age_gender, "age_bias", None),
-            },
-            "headpose_enabled": HEADPOSE_ENABLE,
-            "headpose_loaded": detector.headpose_enabled,
-            "infer_fps": round(_infer_fps, 1)}
-
-
-@app.get("/api/faces")
-def faces():
-    return {"faces": detector.last_faces, "count": detector.last_counts.get("face", 0),
-            "time": time.time()}
-
-
-@app.get("/api/stats")
-def stats():
-    ag = detector.age_gender
-    return {"camera_connected": camera.connected,
-            "instant": detector.last_counts,
-            "smoothed": detector.smoothed,
-            "flip": _flip,
-            "infer_fps": round(_infer_fps, 1),
-            "age_gender": {"runs": ag.runs if ag else 0,
-                           "last_ms": ag.last_ms if ag else 0.0},
-            "window_sec": WINDOW_SEC,
-            "time": time.time()}
-
-
-@app.get("/api/flip")
-def get_flip():
-    return _flip
-
-
-@app.post("/api/flip/set")
-def set_flip(h: int = None, v: int = None):
-    if h is not None:
-        _flip["h"] = bool(int(h))
-    if v is not None:
-        _flip["v"] = bool(int(v))
-    return _flip
-
-
-@app.post("/api/flip/toggle")
-def toggle_flip(axis: str = "h"):
-    if axis in ("h", "horizontal"):
-        _flip["h"] = not _flip["h"]
-    elif axis in ("v", "vertical"):
-        _flip["v"] = not _flip["v"]
-    elif axis in ("both", "180"):
-        _flip["h"] = not _flip["h"]
-        _flip["v"] = not _flip["v"]
-    return _flip
-
-
-def gen_frames():
-    interval = 1.0 / max(1.0, STREAM_FPS)
-    while True:
-        t0 = time.time()
-        with _out_lock:
-            ref = _latest_annotated
-        img = ref.copy() if ref is not None else None
-        if img is None:
-            img = apply_flip(camera.read())
-        ok, buf = cv2.imencode(".jpg", img,
-                               [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_Q])
-        if not ok:
-            continue
-        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-               + buf.tobytes() + b"\r\n")
-        dt = time.time() - t0
-        time.sleep(max(0.0, interval - dt))
-
-
-@app.get("/video_feed")
-def video_feed():
-    return StreamingResponse(gen_frames(),
-                             media_type="multipart/x-mixed-replace; boundary=frame")
+stream_controller.start()

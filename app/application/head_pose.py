@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import threading
+import time
+
+from ..domain.headpose.ports import HeadPoseAnalyzer
+from ..domain.models import Face
+
+
+class HeadPoseService(HeadPoseAnalyzer):
+    def __init__(self, analyzer: HeadPoseAnalyzer | None, enabled: bool):
+        self.analyzer = analyzer if enabled else None
+        self._lock = threading.Lock()
+        self._pending = None
+        self.last_ms = 0.0
+        if self.analyzer is not None:
+            threading.Thread(target=self._bg_loop, daemon=True).start()
+
+    @property
+    def enabled(self) -> bool:
+        return self.analyzer is not None
+
+    @property
+    def pending(self) -> bool:
+        return self._pending is not None
+
+    def _bg_loop(self):
+        while True:
+            try:
+                with self._lock:
+                    job = self._pending
+                    self._pending = None
+                if job is None:
+                    time.sleep(0.05)
+                    continue
+                frame, faces = job
+                started = time.perf_counter()
+                try:
+                    faces = self.analyzer.predict_frame(frame, faces)
+                    self.analyzer.remember(faces)
+                except Exception as exc:
+                    print(f"[headpose-bg] {exc}")
+                self.last_ms = round((time.perf_counter() - started) * 1000, 1)
+            except Exception as exc:
+                print(f"[bg] {exc}")
+                time.sleep(0.2)
+
+    def submit(self, frame, faces: list[Face]) -> None:
+        if self.analyzer is None or not faces:
+            return
+        payload = [{
+            "box": list(face["box"]),
+            "landmarks": face.get("landmarks"),
+            "looking": face.get("looking"),
+        } for face in faces]
+        with self._lock:
+            self._pending = (frame.copy(), payload)
+
+    def predict_frame(self, frame, faces: list[Face]) -> list[Face]:
+        if self.analyzer is None:
+            return faces
+        return self.analyzer.predict_frame(frame, faces)
+
+    def remember(self, faces: list[Face]) -> list[Face]:
+        if self.analyzer is None:
+            return faces
+        return self.analyzer.remember(faces)
+
+    def fill_from_cache(self, faces: list[Face]) -> list[Face]:
+        if self.analyzer is None:
+            return faces
+        return self.analyzer.fill_from_cache(faces)
+
+    def describe(self) -> dict:
+        if self.analyzer is None:
+            return {"backend": "off", "rknn_model": None,
+                    "providers": [], "loaded": False}
+        return self.analyzer.describe()
