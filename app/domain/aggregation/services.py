@@ -16,6 +16,15 @@ def _safe_mode(values):
         return int(collections.Counter(values).most_common(1)[0][0])
 
 
+def _majority(values):
+    if not values:
+        return None
+    counts = collections.Counter(values)
+    best = max(counts.values())
+    return next(value for value in reversed(values)
+                if counts[value] == best)
+
+
 def _stats(values):
     if not values:
         return {"mean": 0.0, "median": 0, "mode": 0}
@@ -113,20 +122,15 @@ class AttributeAggregator:
         fresh = {}
         for person_id, samples in self.tracks.items():
             ages = [sample[1] for sample in samples]
-            males = sum(1 for sample in samples if sample[2] == "Male")
-            females = sum(1 for sample in samples if sample[2] == "Female")
-            if males > females:
-                gender = "Male"
-            elif females > males:
-                gender = "Female"
-            else:
-                gender = samples[-1][2]
+            genders = [sample[2] for sample in samples]
+            males = sum(1 for value in genders if value == "Male")
+            females = sum(1 for value in genders if value == "Female")
             fresh[person_id] = {
-                "gender": gender,
-                "age": int(round(statistics.mean(ages))),
+                "gender": _majority(genders),
+                "age": int(_majority(ages)),
                 "gconf": round(max(males, females) / len(samples), 3),
                 "attr_samples": len(samples),
-                "attr_method": "mean",
+                "attr_method": "mode",
             }
         self.tracks.clear()
         for person_id, result in fresh.items():
