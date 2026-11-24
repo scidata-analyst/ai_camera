@@ -26,6 +26,7 @@ from .infrastructure.rknn.runtime import hw_summary
 from .infrastructure.rknn.whenet_estimator import RknnHeadPoseEstimator
 from .infrastructure.rknn.yolo_detector import RknnPersonDetector
 from .interfaces.controllers import api_controller, stream_controller
+from .interfaces.controllers.stream_controller import StreamController
 from .interfaces.flip_state import FlipState
 from .interfaces.presenters.stats_presenter import StatsPresenter
 

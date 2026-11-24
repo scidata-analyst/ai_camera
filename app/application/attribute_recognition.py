@@ -4,7 +4,7 @@ from ..domain.age.services import AgeService
 from ..domain.attributes.ports import AttributeEstimator, FaceAttributeRecognizer
 from ..domain.aggregation.services import AttributeAggregator
 from ..domain.gender.services import GenderService
-from ..domain.models import AttributeSample, Face
+from ..domain.models import Face
 from ..domain.face.services import FaceQualityService
 
 
