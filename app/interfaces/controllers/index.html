@@ -61,6 +61,7 @@ small{color:#888;font-size:11px}
 <div class="modal-body" id="setting-body">loading settings...</div>
 <div class="modal-foot">
 <span id="setting-msg"></span>
+<button onclick="resetSettings()">Reset All</button>
 <button onclick="closeSettings()">Cancel</button>
 <button onclick="saveSettings()">Save</button>
 </div>
@@ -169,6 +170,23 @@ async function saveSettings(){
     tick();
   }catch(e){
     message.innerText = 'Save failed';
+  }
+}
+async function resetSettings(){
+  const message = document.getElementById('setting-msg');
+  try{
+    const r = await fetch('/api/settings/reset', {
+      method:'POST', headers: HEADERS
+    });
+    const result = await r.json();
+    message.innerText = result.ok
+      ? ('Reset' + (result.restart_required.length
+          ? ' - restart needed: ' + result.restart_required.join(', ') : ''))
+      : 'Reset failed';
+    await loadSettings();
+    tick();
+  }catch(e){
+    message.innerText = 'Reset failed';
   }
 }
 setInterval(tick, 1000); tick();

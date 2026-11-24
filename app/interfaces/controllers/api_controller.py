@@ -4,7 +4,7 @@ import cv2
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ...config.settings import Settings
-from ...config.settings_store import SPECS, describe, update
+from ...config.settings_store import SPECS, describe, reset, update
 from ..auth import require_token
 
 router = APIRouter(dependencies=[Depends(require_token)])
@@ -93,6 +93,17 @@ def post_settings(request: Request, payload: dict[str, object]):
         raise HTTPException(status_code=400, detail=str(exc))
     settings = Settings.from_env()
     _apply_live(request.app.state.runtime, settings)
+    return {"ok": True, "settings": describe_result,
+            "restart_required": restart_required}
+
+
+@router.post("/api/settings/reset")
+def reset_settings(request: Request):
+    describe_result = reset()
+    settings = Settings.from_env()
+    _apply_live(request.app.state.runtime, settings)
+    restart_required = [key for key, spec in SPECS.items()
+                        if not spec["live"]]
     return {"ok": True, "settings": describe_result,
             "restart_required": restart_required}
 

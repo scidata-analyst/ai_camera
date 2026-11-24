@@ -63,6 +63,9 @@ SPECS = {
     "API_TOKEN": {"group": "System", "type": "text", "default": "", "live": True},
 }
 
+BASELINE = {key: os.getenv(key, spec["default"])
+            for key, spec in SPECS.items()}
+
 
 def _coerce(key: str, value) -> str:
     spec = SPECS[key]
@@ -131,6 +134,16 @@ def update(values: dict) -> list[dict]:
         os.environ[key] = value
     try:
         SETTINGS_FILE.write_text(json.dumps(merged, indent=2) + "\n")
+    except OSError:
+        pass
+    return describe()
+
+
+def reset() -> list[dict]:
+    for key, value in BASELINE.items():
+        os.environ[key] = value
+    try:
+        SETTINGS_FILE.unlink()
     except OSError:
         pass
     return describe()
