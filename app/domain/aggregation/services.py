@@ -82,6 +82,7 @@ class AttributeAggregator:
         self.window_sec = float(window_sec)
         self.max_tracks = int(max_tracks)
         self.tracks: dict = {}
+        self._last_good: collections.OrderedDict = collections.OrderedDict()
 
     def _prune(self, now: float):
         cutoff = now - self.window_sec
@@ -113,7 +114,7 @@ class AttributeAggregator:
     def results(self) -> dict:
         now = time.time()
         self._prune(now)
-        output = {}
+        fresh = {}
         for person_id, samples in self.tracks.items():
             ages = [sample[1] for sample in samples]
             males = sum(1 for sample in samples if sample[2] == "Male")
@@ -124,13 +125,24 @@ class AttributeAggregator:
                 gender = "Female"
             else:
                 gender = samples[-1][2]
-            output[person_id] = {
+            fresh[person_id] = {
                 "gender": gender,
                 "age": int(round(statistics.mean(ages))),
                 "gconf": round(max(males, females) / len(samples), 3),
                 "attr_samples": len(samples),
                 "attr_method": "mean",
             }
+        for person_id, result in fresh.items():
+            if person_id in self._last_good:
+                self._last_good.move_to_end(person_id)
+            self._last_good[person_id] = dict(result)
+        overflow = len(self._last_good) - self.max_tracks
+        if overflow > 0:
+            for person_id in list(self._last_good)[:overflow]:
+                del self._last_good[person_id]
+        output = {person_id: dict(result)
+                  for person_id, result in self._last_good.items()}
+        output.update(fresh)
         return output
 
     def fill(self, faces):
