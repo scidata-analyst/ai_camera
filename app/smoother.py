@@ -105,16 +105,12 @@ def _most_common(values):
 
 
 class FaceAttributeSmoother:
-    """1-sec per-face age/gender average smoother.
+    """1-sec average, then LOCK the value for that face.
 
-    Frame-e joto face (ar human) dekha jay, sob prediction 1 sec window-e
-    joma kori. Box-IoU diye eki face-er track dhore:
-
-      * age  = window-er sob age-er average (round)
-      * gender = average signed confidence (+Male / -Female), so low-confidence
-        flicker label-e ase na
-      * latest good value kichu sec porjonto stick kore — label hut kore
-        hatiye jay na.
+    Box-IoU diye eki face-er track dhore proti 1 sec-er sob prediction-er
+    average hoy. Window complete holei value lock kora jay — tar por frame
+    joto thaklo, age/gender ar badla jay na. Face move/new face hole notun
+    track banay; tahari naya value ase.
     """
 
     def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.35,
@@ -123,7 +119,7 @@ class FaceAttributeSmoother:
         self.iou_thr = float(iou_thr)
         self.max_tracks = int(max_tracks)
         self.hold_sec = max(float(hold_sec), self.window_sec)
-        # track = {box, samples: deque[(t, signed_conf, age)], last_good: dict}
+        # track = {box, created, samples, last_good, locked}
         self.tracks: list = []
 
     @staticmethod
@@ -149,21 +145,37 @@ class FaceAttributeSmoother:
     def _signed(gender: str, conf: float) -> float:
         return float(conf) if gender == "Male" else -float(conf)
 
+    @staticmethod
+    def _new_track(box, now, good=None) -> dict:
+        return {"box": box, "created": now, "samples": collections.deque(),
+                "last_good": good, "locked": None}
+
+    @staticmethod
+    def _average(samples, now: float) -> dict:
+        signed_mean = sum(s[1] for s in samples) / len(samples)
+        age_mean = sum(s[2] for s in samples) / len(samples)
+        return {
+            "t": now,
+            "gender": "Male" if signed_mean >= 0 else "Female",
+            "age": int(round(age_mean)),
+            "conf": abs(signed_mean),
+        }
+
     def _prune(self, now: float):
         cutoff = now - self.window_sec
         for track in self.tracks:
             while track["samples"] and track["samples"][0][0] < cutoff:
                 track["samples"].popleft()
-        # Sticky value kothono expire hoy na; max_tracks-e hole oldest badlo.
+        # Locked/sticky value expire hoy na; max_tracks-e hole oldest badlo.
         self.tracks.sort(key=lambda t: (
-            t["last_good"]["t"] if t["last_good"] else 0.0))
+            (t["locked"] or t["last_good"] or {"t": 0.0})["t"]))
         self.tracks = self.tracks[-self.max_tracks:]
 
     def latest(self):
-        """Most recent good (gender, age, conf) across all tracks."""
+        """Most recent locked/good (gender, age, conf) across all tracks."""
         best = None
         for track in self.tracks:
-            good = track["last_good"]
+            good = track["locked"] or track["last_good"]
             if good and (best is None or good["t"] > best["t"]):
                 best = good
         return best
@@ -177,67 +189,67 @@ class FaceAttributeSmoother:
             if gender in (None, "", "Unknown") or age in (None, 0):
                 continue
             conf = max(0.0, min(1.0, float(face.get("gconf", 0.0))))
-            signed = self._signed(str(gender), conf)
             box = [int(v) for v in face["box"]]
             track = self._match(box)
             if track is None:
-                track = {"box": box, "samples": collections.deque(),
-                         "last_good": None}
+                track = self._new_track(box, now)
                 self.tracks.append(track)
             track["box"] = box
-            track["samples"].append((now, signed, int(age)))
+            if track["locked"] is not None:
+                track["locked"]["t"] = now  # value notun kore janbe na
+                continue
+            track["samples"].append(
+                (now, self._signed(str(gender), conf), int(age)))
             track["last_good"] = {
                 "t": now, "gender": str(gender), "age": int(age), "conf": conf}
         self._prune(now)
 
     def fill(self, faces):
-        """Write 1-sec average gender/age onto each face (sticky fallback)."""
+        """Write locked/averaged/sticky gender-age onto each face."""
         now = time.time()
         self._prune(now)
         for face in faces:
             box = [int(v) for v in face["box"]]
             track = self._match(box)
             if track is None:
-                # Face already has a good value? Adopt it without adding a sample.
+                good = None
                 if face.get("gender") not in (None, "", "Unknown") \
                         and face.get("age") not in (None, 0):
-                    track = {"box": box, "samples": collections.deque(),
-                             "last_good": {
-                                 "t": now, "gender": str(face["gender"]),
-                                 "age": int(face["age"]),
-                                 "conf": float(face.get("gconf", 0.0))}}
-                    self.tracks.append(track)
+                    good = {
+                        "t": now, "gender": str(face["gender"]),
+                        "age": int(face["age"]),
+                        "conf": float(face.get("gconf", 0.0))}
+                track = self._new_track(box, now, good)
+                self.tracks.append(track)
+
+            if track["locked"] is not None:
+                value, method, samples_n = track["locked"], "locked", 0
+            elif track["samples"]:
+                samples_n = len(track["samples"])
+                value = self._average(track["samples"], now)
+                if now - track["created"] >= self.window_sec:
+                    # 1 sec complete → lock forever. Ar kisui change korbe na.
+                    track["locked"] = value
+                    track["last_good"] = value
+                    track["samples"].clear()
+                    method = "locked"
                 else:
-                    # Dummy track: nicher global sticky fallback label debe.
-                    track = {"box": box, "samples": collections.deque(),
-                             "last_good": None}
-            samples = track["samples"]
-            if samples:
-                signed_mean = sum(s[1] for s in samples) / len(samples)
-                age_mean = sum(s[2] for s in samples) / len(samples)
-                gender = "Male" if signed_mean >= 0 else "Female"
-                age = int(round(age_mean))
-                conf = abs(signed_mean)
-                samples_n = len(samples)
-                method = "mean"
+                    method = "mean"
             elif track["last_good"]:
-                good = track["last_good"]
-                gender, age, conf = good["gender"], good["age"], good["conf"]
-                samples_n, method = 0, "sticky"
+                value, method, samples_n = track["last_good"], "sticky", 0
             else:
-                # Kono track na mileo label hide korbo na — latest known bole deo.
                 good = self.latest()
                 if good:
-                    gender, age, conf = (
-                        good["gender"], good["age"], good["conf"])
-                    method = "sticky-global"
+                    value, method = good, "sticky-global"
                 else:
-                    gender, age, conf, method = "Unknown", 0, 0.0, "default"
+                    value = {"gender": "Unknown", "age": 0, "conf": 0.0}
+                    method = "default"
                 samples_n = 0
+
             face.update({
-                "gender": gender,
-                "age": age,
-                "gconf": round(conf, 3),
+                "gender": value["gender"],
+                "age": int(value["age"]),
+                "gconf": round(float(value["conf"]), 3),
                 "attr_samples": samples_n,
                 "attr_method": method,
                 "attr_sticky": True,
