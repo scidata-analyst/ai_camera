@@ -10,6 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FAIRFACE_URL = (
     "https://huggingface.co/livinNector/fairface/resolve/main/fairface.onnx")
+DLIB_AGE_URL = (
+    "https://raw.githubusercontent.com/mowshon/age-and-gender/master/"
+    "src/age_and_gender/models/age-v1.onnx")
 
 
 def convert(model: Path, output: Path, target: str,
@@ -75,6 +78,18 @@ def main() -> None:
         ROOT / "models/fairface-rk3576.rknn",
         args.target, [[0, 0, 0]], [[1, 1, 1]],
         input_name="input", input_size=(1, 3, 224, 224),
+    )
+
+    age = ROOT / "models/dlib-age-v1.onnx"
+    if not age.is_file():
+        print(f"[download] {DLIB_AGE_URL}")
+        urllib.request.urlretrieve(DLIB_AGE_URL, age)
+
+    convert(
+        age,
+        ROOT / "models/dlib-age-rk3576.rknn",
+        args.target, [[0, 0, 0]], [[1, 1, 1]],
+        input_name="images", input_size=(1, 3, 64, 64),
     )
 
 

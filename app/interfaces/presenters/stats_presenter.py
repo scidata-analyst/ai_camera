@@ -71,6 +71,9 @@ class StatsPresenter:
             "age_gender_backend": attributes.get("backend", "off"),
             "age_gender_model": attributes.get("onnx_model"),
             "age_gender_rknn_model": attributes.get("rknn_model"),
+            "age_gender_model_kind": attributes.get("model_kind"),
+            "age_loaded": attributes.get("age_loaded", False),
+            "age_rknn_model": attributes.get("age_rknn_model"),
             "age_gender_align": attributes.get("align"),
             "face_blur_min": attributes.get("blur"),
             "headpose_enabled": self.settings.headpose_enable,
@@ -90,6 +93,10 @@ class StatsPresenter:
             "age_gender": {
                 "runs": attributes.get("runs", 0),
                 "last_ms": attributes.get("last_ms", 0.0),
+            },
+            "age_rknn": {
+                "runs": attributes.get("age_runs", 0),
+                "last_ms": attributes.get("age_last_ms", 0.0),
             },
             "interval": self.settings.interval,
             "time": time.time(),

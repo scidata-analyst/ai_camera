@@ -7,6 +7,10 @@ import numpy as np
 
 from ...config.constants import (
     AGE_INPUT_SIZE,
+    AGE_ONLY_INPUT_SIZE,
+    DLIB_AGE_MEAN,
+    DLIB_AGE_SCALE,
+    DLIB_AGE_WEIGHTS,
     FAIRFACE_AGE_BINS,
     FAIRFACE_MEAN,
     FAIRFACE_STD,
@@ -37,6 +41,14 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         self.input_size = AGE_INPUT_SIZE if self.fairface else LEGACY_AGE_INPUT_SIZE
         self._mean = np.asarray(FAIRFACE_MEAN, dtype=np.float32)
         self._std = np.asarray(FAIRFACE_STD, dtype=np.float32)
+        self._age_mean = np.asarray(DLIB_AGE_MEAN, dtype=np.float32)
+        self.age_rknn = None
+        self.age_rknn_path = settings.age_only_rknn_path
+        self.age_runs = 0
+        self.age_last_ms = 0.0
+        if self.rknn is not None and self.fairface and self.age_rknn_path:
+            self.age_rknn, age_core = rknn_load(self.age_rknn_path, "age")
+            print(f"[age] RKNN NPU active: {self.age_rknn_path} core={age_core}")
         self.runs = 0
         self.last_ms = 0.0
 
@@ -47,6 +59,10 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             "rknn_model": self.rknn_path,
             "model_kind": "fairface" if self.fairface else "genderage",
             "input_size": self.input_size,
+            "age_rknn_model": self.age_rknn_path,
+            "age_loaded": self.age_rknn is not None,
+            "age_runs": self.age_runs,
+            "age_last_ms": self.age_last_ms,
             "loaded": self.rknn is not None,
             "runs": self.runs,
             "last_ms": self.last_ms,
@@ -65,6 +81,39 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         )
         return np.ascontiguousarray(
             np.transpose(blob, (0, 2, 3, 1)), dtype=np.float32)
+
+    def _age_blob(self, aligned: np.ndarray) -> np.ndarray:
+        chip = cv2.resize(
+            aligned, (AGE_ONLY_INPUT_SIZE, AGE_ONLY_INPUT_SIZE),
+            interpolation=cv2.INTER_AREA)
+        rgb = chip[:, :, ::-1].astype(np.float32)
+        rgb = (rgb - self._age_mean) / DLIB_AGE_SCALE
+        return np.ascontiguousarray(
+            rgb.transpose(2, 0, 1)[np.newaxis, ...], dtype=np.float32)
+
+    def _age_value(self, outputs) -> float:
+        for output in outputs:
+            array = np.asarray(output, dtype=np.float32).reshape(-1)
+            if array.size == DLIB_AGE_WEIGHTS.size:
+                return float(np.dot(array, DLIB_AGE_WEIGHTS))
+        raise RuntimeError(
+            f"expected {DLIB_AGE_WEIGHTS.size} age classes, got "
+            f"{[np.asarray(value).shape for value in outputs]}")
+
+    def _estimate_age(self, aligned: np.ndarray, fallback: float) -> float:
+        started = time.perf_counter()
+        try:
+            blob = self._age_blob(aligned)
+            outputs = rknn_infer(self.age_rknn, blob, "nchw", "float32")
+            if not outputs:
+                raise RuntimeError("age RKNN returned no outputs")
+            self.age_runs += 1
+            return self._age_value(outputs)
+        except Exception as exc:
+            print(f"[age] inference failed: {exc}")
+            return fallback
+        finally:
+            self.age_last_ms = round((time.perf_counter() - started) * 1000, 1)
 
     def _output_names(self) -> list[str]:
         try:
@@ -123,8 +172,17 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 raise RuntimeError("RKNN returned no outputs")
             self.runs += 1
             if self.fairface:
-                return self._fairface_sample(
+                sample = self._fairface_sample(
                     outputs, mode, float(face.get("sharpness", 0.0)))
+                if self.age_rknn is not None:
+                    age = self._estimate_age(aligned, sample.raw_age)
+                    sample = AttributeSample(
+                        raw_age=age,
+                        gender_logits=sample.gender_logits,
+                        align=sample.align,
+                        sharpness=sample.sharpness,
+                    )
+                return sample
             values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
             if values.size != 3:
                 raise RuntimeError(

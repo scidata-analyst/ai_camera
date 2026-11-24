@@ -23,6 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AGE_GENDER_MODEL=/app/models/fairface.onnx \
     AGE_GENDER_RKNN_MODEL=/app/models/fairface-rk3576.rknn \
     AGE_GENDER_ALIGN=arcface \
+    AGE_RKNN_MODEL=/app/models/dlib-age-rk3576.rknn \
     HEADPOSE_BACKEND=rknn \
     HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn \
     OPENCV_OPENCL=auto \

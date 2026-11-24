@@ -4,10 +4,11 @@ Camera stream-er pipeline:
 
 - YOLO11n detects `person` and COCO objects.
 - RetinaFace detects face boxes and five landmarks.
-- FairFace estimates gender and age from each aligned face crop.
+- FairFace estimates gender from each aligned face crop.
+- The dlib age predictor estimates age from the same crop on the NPU.
 - WHENet estimates head pose / whether a face is looking at the camera.
 
-RetinaFace is the face detector. Age and gender come from the stronger FairFace ResNet-34 head on the NPU. MiVOLO is removed.
+RetinaFace is the face detector. Gender comes from FairFace ResNet-34 and age comes from the dlib ResNet-10 age predictor; both run through RKNN on the NPU. MiVOLO is removed.
 
 ## Code structure
 
@@ -56,9 +57,10 @@ The ONNX models are in `models/`:
 
 - `RetinaFace_mobile320.onnx` — official RKNN Model Zoo RetinaFace mobile model
 - `fairface.onnx` — FairFace ResNet-34 race/gender/age model (MIT source, CC BY 4.0 weights)
+- `dlib-age-v1.onnx` — dlib ResNet-10 age predictor, 81 age classes (CC0-1.0, contributed by Cydral Technology)
 - Existing YOLO11n and WHENet files
 
-On an x86_64 Linux PC with RKNN-Toolkit2 installed, convert RetinaFace and FairFace for RK3576 manually:
+On an x86_64 Linux PC with RKNN-Toolkit2 installed, convert RetinaFace, FairFace and the dlib age predictor for RK3576 manually:
 
 ```bash
 python tools/export_face_models_rknn.py --target rk3576
@@ -68,10 +70,13 @@ This creates:
 
 - `models/RetinaFace_mobile320-rk3576.rknn`
 - `models/fairface-rk3576.rknn`
+- `models/dlib-age-rk3576.rknn`
 
-The app is **NPU-only**: YOLO, RetinaFace, FairFace and WHENet all run through RKNNLite. CPU/ONNX fallbacks were removed — a missing or failed RKNN model makes startup fail with a clear error instead of silently using CPU. Compose only mounts `models/`; it does not start conversion.
+The age model uses the same 224×224 aligned crop as FairFace, resized to 64×64; its 81 class probabilities are combined with the dlib age weights. If the separate age model fails, FairFace's nine-bin age is used as a fallback. Gender always comes from FairFace.
 
-For commercial deployment, check the pretrained model licenses first: the FairFace weights are CC BY 4.0. See the [FairFace project](https://github.com/dchen236/FairFace) and the [RKNN Model Zoo RetinaFace example](https://github.com/airockchip/rknn_model_zoo/tree/main/examples/RetinaFace).
+The app is **NPU-only**: YOLO, RetinaFace, FairFace, the dlib age predictor and WHENet all run through RKNNLite. CPU/ONNX fallbacks were removed — a missing or failed RKNN model makes startup fail with a clear error instead of silently using CPU. Compose only mounts `models/`; it does not start conversion.
+
+For commercial deployment, check the pretrained model licenses first: the FairFace weights are CC BY 4.0; the dlib age weights are CC0-1.0. See the [FairFace project](https://github.com/dchen236/FairFace), the [dlib age models](https://github.com/davisking/dlib-models) and the [RKNN Model Zoo RetinaFace example](https://github.com/airockchip/rknn_model_zoo/tree/main/examples/RetinaFace).
 
 ## Main settings
 
@@ -84,7 +89,8 @@ For commercial deployment, check the pretrained model licenses first: the FairFa
 | `FACE_RKNN_MODEL` | `/app/models/RetinaFace_mobile320-rk3576.rknn` | RetinaFace RKNN model |
 | `AGE_GENDER_BACKEND` | `rknn` | FairFace on NPU only; `off` disables it |
 | `AGE_GENDER_MODEL` | `/app/models/fairface.onnx` | Legacy path (unused in NPU-only mode) |
-| `AGE_GENDER_RKNN_MODEL` | `/app/models/fairface-rk3576.rknn` | FairFace RKNN model |
+| `AGE_GENDER_RKNN_MODEL` | `/app/models/fairface-rk3576.rknn` | FairFace RKNN model (gender) |
+| `AGE_RKNN_MODEL` | `/app/models/dlib-age-rk3576.rknn` | dlib age RKNN model; needs restart |
 | `CONF_THRESHOLD` | `0.5` | NMS score floor for person boxes |
 | `PERSON_CONF` | `0.65` | Minimum score required for a `person` box |
 | `PERSON_MIN_H` | `0` | Minimum person-box height in pixels; `0` = no size limit |
@@ -101,7 +107,7 @@ For commercial deployment, check the pretrained model licenses first: the FairFa
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-FairFace is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. The model returns gender probabilities and nine age-bin probabilities; the displayed age is the weighted mean of those bins. Predictions are collected for `INTERVAL` seconds (1 by default, changeable live from the Setting popup), then one result is published per person and the collected samples are cleared. Tracks are matched by **human-box IoU**, so multiple people keep separate results. The displayed age and gender are majority votes of that person's samples in the interval (for example, 6 male vs 4 female gives male). A tie uses the most recent prediction. Between two publish moments the last valid age/gender is held, so a failed or skipped frame never hides the label. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
+Age and gender are visual estimates; small, blurry, profile, or poorly lit faces can reduce reliability. They do not identify a person's actual gender or exact age. Gender comes from FairFace's gender probabilities. Age comes from the dlib age predictor's 81 age classes (weighted sum); FairFace's nine age bins are used only if the separate age model fails. Predictions are collected for `INTERVAL` seconds (1 by default, changeable live from the Setting popup), then one result is published per person and the collected samples are cleared. Tracks are matched by **human-box IoU**, so multiple people keep separate results. The displayed age and gender are majority votes of that person's samples in the interval (for example, 6 male vs 4 female gives male). A tie uses the most recent prediction. Between two publish moments the last valid age/gender is held, so a failed or skipped frame never hides the label. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
 
 The page is served from `app/interfaces/controllers/index.html`. Ubuntu Sans is bundled at `app/interfaces/controllers/UbuntuSans.ttf` and served at `/ubuntu-sans.ttf`, so both the page and the video overlay use the same font without network access. The **Setting** popup controls every supported environment variable. Fields marked `needs restart` are saved but require a container restart; all other fields apply immediately. Saved values are written to `SETTINGS_FILE` (default `app/config/saved_settings.json`; Compose mounts `./settings` at `/app/config`), so they survive restarts. **Reset All** restores the startup values and removes the saved file. If `API_TOKEN` is set, open `/?token=<token>` so the page can authenticate its API requests.
 

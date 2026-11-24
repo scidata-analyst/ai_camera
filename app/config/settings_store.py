@@ -7,6 +7,7 @@ from pathlib import Path
 from .constants import (
     ALIGN_MODES,
     DEFAULT_AGE_ONNX,
+    DEFAULT_AGE_ONLY_RKNN,
     DEFAULT_AGE_RKNN,
     DEFAULT_FACE_ONNX,
     DEFAULT_FACE_RKNN,
@@ -49,6 +50,7 @@ SPECS = {
     "AGE_GENDER_BACKEND": {"group": "Age / Gender", "type": "text", "default": "rknn", "live": False, "choices": ["rknn", "off"]},
     "AGE_GENDER_MODEL": {"group": "Age / Gender", "type": "text", "default": DEFAULT_AGE_ONNX, "live": False},
     "AGE_GENDER_RKNN_MODEL": {"group": "Age / Gender", "type": "text", "default": DEFAULT_AGE_RKNN, "live": False},
+    "AGE_RKNN_MODEL": {"group": "Age / Gender", "type": "text", "default": DEFAULT_AGE_ONLY_RKNN, "live": False},
     "AGE_GENDER_ALIGN": {"group": "Age / Gender", "type": "text", "default": "arcface", "live": True, "choices": list(ALIGN_MODES)},
     "HEADPOSE_ENABLE": {"group": "Head Pose", "type": "bool", "default": "1", "live": False},
     "HEADPOSE_BACKEND": {"group": "Head Pose", "type": "text", "default": "rknn", "live": False, "choices": ["rknn", "off"]},

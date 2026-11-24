@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .constants import (
     ALIGN_MODES,
     DEFAULT_AGE_ONNX,
+    DEFAULT_AGE_ONLY_RKNN,
     DEFAULT_AGE_RKNN,
     DEFAULT_FACE_ONNX,
     DEFAULT_FACE_RKNN,
@@ -77,6 +78,7 @@ class Settings:
     age_backend: str
     age_onnx_path: str
     age_rknn_path: str
+    age_only_rknn_path: str
     face_blur: float
     age_align: str
     headpose_backend: str
@@ -124,6 +126,7 @@ class Settings:
             age_backend=_text("AGE_GENDER_BACKEND", "rknn").lower(),
             age_onnx_path=_text("AGE_GENDER_MODEL", DEFAULT_AGE_ONNX),
             age_rknn_path=_text("AGE_GENDER_RKNN_MODEL", DEFAULT_AGE_RKNN),
+            age_only_rknn_path=_text("AGE_RKNN_MODEL", DEFAULT_AGE_ONLY_RKNN),
             face_blur=_float("FACE_BLUR", 80.0),
             age_align=align,
             headpose_backend=_text("HEADPOSE_BACKEND", "rknn").lower(),
