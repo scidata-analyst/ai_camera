@@ -48,6 +48,10 @@ Open `http://localhost:8080`. Status endpoints:
 
 ## Models
 
+Model binaries are stored in Git LFS. After cloning, run
+`git lfs install && git lfs pull` before building the Docker image; otherwise
+the working tree contains small pointer files instead of the real models.
+
 The ONNX models are in `models/`:
 
 - `RetinaFace_mobile320.onnx` — official RKNN Model Zoo RetinaFace mobile model
