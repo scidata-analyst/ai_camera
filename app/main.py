@@ -19,7 +19,7 @@ STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
-FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face e gender off
+FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "0"))  # 0 = sob face-e age/gender
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
 

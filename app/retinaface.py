@@ -174,11 +174,5 @@ class RetinaFace:
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             for px, py in face.get("landmarks", []):
                 cv2.circle(frame, (int(px), int(py)), 2, (0, 0, 255), -1)
-            # Age/gender label always sticky — kisui hide hoy na.
-            gender = face.get("gender") or "Unknown"
-            age = face.get("age", 0)
-            conf = face.get("gconf", 0.0)
-            label = f"{gender} {age}y {conf:.2f}"
-            cv2.putText(frame, label, (x1, max(y1 - 6, 14)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 2)
+            # Face box-e kono text/label dewa hoy na. Human box-ei label thakbe.
         return frame

@@ -38,7 +38,7 @@ class HumanDetector:
 
     def __init__(self, model_name: str = "yolo11n.pt", conf: float = 0.5, imgsz: int = 640,
                  window_sec: float = 1.0, face_enable: bool = True,
-                 headpose_enable: bool = True, face_min_size: int = 60):
+                 headpose_enable: bool = True, face_min_size: int = 0):
         self.conf = conf
         self.imgsz = imgsz
         self.model_name = model_name
@@ -380,16 +380,20 @@ class HumanDetector:
         non_human_n = 0
 
         def _face_for_human(d: Dict):
-            """Human box-er moddhe thaka (average-smoothed) face khujo."""
+            """Human box-er sathe sobar beshi overlap kora face khujo."""
             x1, y1, x2, y2 = d["box"]
-            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-            best, best_area = None, None
+            best, best_iou = None, 0.0
+            human_area = max(1, (x2 - x1) * (y2 - y1))
             for f in faces:
                 fx1, fy1, fx2, fy2 = f["box"]
-                if fx1 <= cx <= fx2 and fy1 <= cy <= fy2:
-                    area = (fx2 - fx1) * (fy2 - fy1)
-                    if best_area is None or area < best_area:
-                        best, best_area = f, area
+                ix1, iy1 = max(x1, fx1), max(y1, fy1)
+                ix2, iy2 = min(x2, fx2), min(y2, fy2)
+                inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                if inter <= 0:
+                    continue
+                iou = inter / min(human_area, max(1, (fx2 - fx1) * (fy2 - fy1)))
+                if iou > best_iou:
+                    best, best_iou = f, iou
             return best
 
         # Boxes draw kora hoy face/check-er por, jate bade dewa box dekha na jay.
@@ -398,13 +402,13 @@ class HumanDetector:
                 continue
             x1, y1, x2, y2 = d["box"]
             face = _face_for_human(d)
-            if face is not None:
-                gender = face.get("gender") or "Unknown"
-                age = face.get("age", 0)
+            gender = face.get("gender") if face is not None else None
+            age = face.get("age") if face is not None else None
+            if gender not in (None, "", "Unknown") and age:
+                label = f"Human {gender} {age}y {d['conf']:.2f}"
             else:
-                # Onno manush-er age/gender copy korbo na.
-                gender, age = "Unknown", 0
-            label = f"Human {gender} {age}y {d['conf']:.2f}"
+                # Age/gender na thakle 'Unknown' dekhabo na.
+                label = f"Human {d['conf']:.2f}"
             color = (0, 255, 0)  # green
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)

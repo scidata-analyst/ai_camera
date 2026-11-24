@@ -65,14 +65,14 @@ For commercial deployment, check the pretrained model licenses first: InsightFac
 | `DET_STALE_SEC` | `0.2` | Max age of a reused box before YOLO is forced to re-run |
 | `YOLO_DEBUG` | `0` | Set to `1` to print the max NPU person score once at startup |
 | `FACE_SCORE` | `0.6` | Minimum RetinaFace confidence |
-| `FACE_MIN_SIZE` | `60` | Smaller face boxes show gender as `Unknown` |
+| `FACE_MIN_SIZE` | `0` | Minimum face size for age/gender; `0` = analyze every face |
 | `FACE_EVERY` | `1` | Run face detection every N inference frames |
 | `MAX_FACES` | `0` | Per-frame face cap; `0` = unlimited (detect all) |
 | `HEADPOSE_ENABLE` | `1` | WHENet head-pose stage on NPU |
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels average every detected human frame for 1 second (gender = average signed confidence, age = rounded mean), then **lock** that value for the tracked face — the label neither flickers nor changes without a new/moving face. Tracks are matched per person by face-box IoU, so multiple people in one frame keep separate ages/genders; a missing face keeps its own last value and never copies another person's.
+GenderAge is a visual estimate; small, blurry, profile, or poorly lit faces can reduce reliability. It does not identify a person's actual gender or exact age. Displayed age/gender labels average every detected human frame for 1 second (gender = average signed confidence, age = rounded mean), then **lock** that value for the tracked face — the label neither flickers nor changes without a new/moving face. Tracks are matched per person by face-box IoU, so multiple people in one frame keep separate ages/genders; a missing face keeps its own last value and never copies another person's. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
 
 ## Existing exporters
 

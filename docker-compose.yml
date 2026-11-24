@@ -48,7 +48,7 @@ services:
       - FACE_BACKEND=rknn
       - FACE_RKNN_MODEL=/app/models/RetinaFace_mobile320-rk3576.rknn
       - FACE_SCORE=0.6
-      - FACE_MIN_SIZE=60
+      - FACE_MIN_SIZE=0
       - AGE_GENDER_BACKEND=rknn
       - AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn
       - HEADPOSE_ENABLE=1
