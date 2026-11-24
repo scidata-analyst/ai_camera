@@ -30,7 +30,7 @@ def _apply_live(runtime, settings: Settings) -> None:
     human.detect_every = max(1, settings.detect_every)
     human.stale_sec = settings.det_stale_sec
 
-    runtime.processor.count_aggregator.window_sec = settings.window_sec
+    runtime.processor.count_aggregator.window_sec = settings.count_window
 
     face = runtime.processor.face_detection
     if face is not None:
@@ -44,7 +44,11 @@ def _apply_live(runtime, settings: Settings) -> None:
         attributes.quality.blur_threshold = settings.face_blur
         attributes.min_size = settings.face_min_size
         attributes.align_mode = settings.age_align
-        attributes.aggregator.window_sec = settings.window_sec
+        aggregator = attributes.aggregator
+        if hasattr(aggregator, "set_window"):
+            aggregator.set_window(settings.window_sec)
+        else:
+            aggregator.window_sec = settings.window_sec
 
     headpose = runtime.processor.headpose
     if headpose is not None and headpose.analyzer is not None:

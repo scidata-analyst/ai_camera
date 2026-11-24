@@ -75,7 +75,7 @@ def _build_runtime() -> SimpleNamespace:
         person_detector, settings.conf, settings.person_min_h,
         settings.person_require_face, settings.detect_every,
         settings.det_stale_sec)
-    count_aggregator = CountAggregator(settings.window_sec)
+    count_aggregator = CountAggregator(settings.count_window)
     renderer = OpenCVFrameRenderer()
     processor = FrameProcessor(human_detection, face_detection, attributes,
                                headpose, count_aggregator, renderer)

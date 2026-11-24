@@ -58,6 +58,7 @@ SPECS = {
     "LOOK_PITCH": {"group": "Head Pose", "type": "float", "default": "20", "live": True},
     "HEADPOSE_TTL": {"group": "Head Pose", "type": "float", "default": "1", "live": True},
     "SMOOTH_WINDOW": {"group": "System", "type": "float", "default": "1", "live": True},
+    "COUNT_WINDOW": {"group": "System", "type": "float", "default": "1", "live": True},
     "CV_THREADS": {"group": "System", "type": "int", "default": "4", "live": False},
     "API_TOKEN": {"group": "System", "type": "text", "default": "", "live": True},
 }

@@ -82,15 +82,12 @@ class AttributeAggregator:
         self.window_sec = float(window_sec)
         self.tracks: dict = {}
         self._last_good: collections.OrderedDict = collections.OrderedDict()
+        self._last_publish = time.time()
 
-    def _prune(self, now: float):
-        cutoff = now - self.window_sec
-        for person_id in list(self.tracks):
-            samples = self.tracks[person_id]
-            while samples and samples[0][0] < cutoff:
-                samples.popleft()
-            if not samples:
-                del self.tracks[person_id]
+    def set_window(self, window_sec: float) -> None:
+        self.window_sec = float(window_sec)
+        self._last_publish = time.time()
+        self.tracks.clear()
 
     def add(self, faces):
         now = time.time()
@@ -104,11 +101,12 @@ class AttributeAggregator:
                 continue
             samples = self.tracks.setdefault(person_id, collections.deque())
             samples.append((now, int(age), str(gender)))
-        self._prune(now)
 
     def results(self) -> dict:
         now = time.time()
-        self._prune(now)
+        if now - self._last_publish < self.window_sec:
+            return {person_id: dict(result)
+                    for person_id, result in self._last_good.items()}
         fresh = {}
         for person_id, samples in self.tracks.items():
             ages = [sample[1] for sample in samples]
@@ -127,14 +125,14 @@ class AttributeAggregator:
                 "attr_samples": len(samples),
                 "attr_method": "mean",
             }
+        self.tracks.clear()
         for person_id, result in fresh.items():
             if person_id in self._last_good:
                 self._last_good.move_to_end(person_id)
             self._last_good[person_id] = dict(result)
-        output = {person_id: dict(result)
-                  for person_id, result in self._last_good.items()}
-        output.update(fresh)
-        return output
+        self._last_publish = now
+        return {person_id: dict(result)
+                for person_id, result in self._last_good.items()}
 
     def fill(self, faces):
         results = self.results()
