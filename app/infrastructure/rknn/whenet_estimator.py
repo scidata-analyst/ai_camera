@@ -99,7 +99,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                         break
                 if not replaced:
                     self._cache.append(entry)
-            self._cache = self._cache[-20:]
         return faces
 
     def fill_from_cache(self, faces: list[Face]) -> list[Face]:

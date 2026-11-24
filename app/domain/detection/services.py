@@ -60,7 +60,7 @@ class HumanDetectionService:
                 self._tracks.append({"id": self._next_id, "box": box})
                 used.add(self._next_id)
         self._tracks = [track for track in self._tracks
-                        if track["id"] in used][-20:]
+                        if track["id"] in used]
 
     def detect(self, frame) -> list[Detection]:
         self._frame_no += 1

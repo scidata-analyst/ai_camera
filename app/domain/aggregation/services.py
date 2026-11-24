@@ -78,9 +78,8 @@ class CountAggregator:
 
 
 class AttributeAggregator:
-    def __init__(self, window_sec: float = 1.0, max_tracks: int = 100):
+    def __init__(self, window_sec: float = 1.0):
         self.window_sec = float(window_sec)
-        self.max_tracks = int(max_tracks)
         self.tracks: dict = {}
         self._last_good: collections.OrderedDict = collections.OrderedDict()
 
@@ -91,10 +90,6 @@ class AttributeAggregator:
             while samples and samples[0][0] < cutoff:
                 samples.popleft()
             if not samples:
-                del self.tracks[person_id]
-        overflow = len(self.tracks) - self.max_tracks
-        if overflow > 0:
-            for person_id in list(self.tracks)[:overflow]:
                 del self.tracks[person_id]
 
     def add(self, faces):
@@ -136,10 +131,6 @@ class AttributeAggregator:
             if person_id in self._last_good:
                 self._last_good.move_to_end(person_id)
             self._last_good[person_id] = dict(result)
-        overflow = len(self._last_good) - self.max_tracks
-        if overflow > 0:
-            for person_id in list(self._last_good)[:overflow]:
-                del self._last_good[person_id]
         output = {person_id: dict(result)
                   for person_id, result in self._last_good.items()}
         output.update(fresh)
