@@ -2,3 +2,4 @@ fastapi==0.116.2
 uvicorn==0.30.6
 opencv-python-headless==4.11.0.86
 numpy==1.26.4
+Pillow==10.4.0

@@ -102,5 +102,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)",
               lifespan=lifespan)
+app.include_router(stream_controller.public_router)
 app.include_router(stream_controller.router)
 app.include_router(api_controller.router)

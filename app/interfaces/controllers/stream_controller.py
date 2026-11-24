@@ -15,8 +15,15 @@ from ..auth import require_token
 from ..flip_state import FlipState
 
 INDEX_PATH = Path(__file__).with_name("index.html")
+FONT_PATH = Path(__file__).with_name("UbuntuSans.ttf")
 
+public_router = APIRouter()
 router = APIRouter(dependencies=[Depends(require_token)])
+
+
+@public_router.get("/ubuntu-sans.ttf")
+def ubuntu_sans():
+    return FileResponse(FONT_PATH, media_type="font/ttf")
 
 
 @router.get("/")

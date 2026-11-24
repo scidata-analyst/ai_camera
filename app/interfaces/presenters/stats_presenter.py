@@ -92,6 +92,7 @@ class StatsPresenter:
                 "last_ms": attributes.get("last_ms", 0.0),
             },
             "window_sec": self.settings.window_sec,
+            "count_window": self.settings.count_window,
             "time": time.time(),
         }
 

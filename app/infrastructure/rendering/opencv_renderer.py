@@ -4,9 +4,14 @@ import cv2
 import numpy as np
 
 from ...application.ports import FrameRenderer
+from .text import draw as draw_text, measure as measure_text
 
 
 class OpenCVFrameRenderer(FrameRenderer):
+    LABEL_SIZE = 16
+    HEADER_SIZE = 20
+    SUB_SIZE = 16
+
     def draw_faces(self, frame: np.ndarray, faces: list[dict]) -> None:
         for face in faces:
             x1, y1, x2, y2 = face["box"]
@@ -28,11 +33,11 @@ class OpenCVFrameRenderer(FrameRenderer):
                 label = f"Human {detection['conf']:.2f}"
             color = (0, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            (tw, th), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw, y1), color, -1)
-            cv2.putText(frame, label, (x1, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            width, height = measure_text(label, self.LABEL_SIZE, 1)
+            top = max(0, y1 - height - 8)
+            cv2.rectangle(frame, (x1, top), (x1 + width + 4, y1), color, -1)
+            draw_text(frame, (x1 + 2, top + 2), label, self.LABEL_SIZE,
+                      (0, 0, 0), 1, (0, 0, 0))
 
     def draw_overlay(self, frame: np.ndarray, values: dict) -> None:
         header = (
@@ -41,10 +46,9 @@ class OpenCVFrameRenderer(FrameRenderer):
             f"M:{values['male_n']}[{values['stable_male']}] "
             f"W:{values['female_n']}[{values['stable_female']}] "
             f"Look:{values['look_n']} FPS:{values['fps']:.1f}")
-        sub = (f"1s avg mean:{values['mean']} "
+        seconds = f"{float(values['window_sec']):g}s"
+        sub = (f"{seconds} avg mean:{values['mean']} "
                f"median:{values['median']} mode:{values['mode']}")
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 56), (0, 0, 0), -1)
-        cv2.putText(frame, header, (10, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(frame, sub, (10, 46),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+        draw_text(frame, (10, 6), header, self.HEADER_SIZE, (255, 255, 255), 1)
+        draw_text(frame, (10, 31), sub, self.SUB_SIZE, (0, 255, 255))

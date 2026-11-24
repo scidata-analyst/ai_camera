@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from ...application.ports import FrameSource
+from ..rendering.text import draw as draw_text
 
 
 class OpenCVCamera(FrameSource):
@@ -65,10 +66,10 @@ class OpenCVCamera(FrameSource):
         position = int(time.time() * 2) % self.width
         cv2.rectangle(image, (position - 80, 100), (position, 300),
                       (255, 255, 255), -1)
-        cv2.putText(image, "NO CAMERA - synthetic feed", (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        cv2.putText(image, f"src={self.source} set CAMERA_SOURCE", (20, 70),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+        draw_text(image, (20, 20), "NO CAMERA - synthetic feed", 20,
+                  (0, 255, 255), 1)
+        draw_text(image, (20, 48), f"src={self.source} set CAMERA_SOURCE",
+                  16, (200, 200, 200))
         return image
 
     def _loop(self) -> None:

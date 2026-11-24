@@ -94,6 +94,7 @@ class FrameProcessor:
             "mean": human_stats["mean"],
             "median": human_stats["median"],
             "mode": human_stats["mode"],
+            "window_sec": self.count_aggregator.window_sec,
             "fps": self._fps_smooth,
         })
 
