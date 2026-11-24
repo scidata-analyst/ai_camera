@@ -113,7 +113,7 @@ class FaceAttributeSmoother:
     track banay; tahari naya value ase.
     """
 
-    def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.35,
+    def __init__(self, window_sec: float = 1.0, iou_thr: float = 0.50,
                  max_tracks: int = 100, hold_sec: float = 5.0):
         self.window_sec = float(window_sec)
         self.iou_thr = float(iou_thr)
@@ -170,15 +170,6 @@ class FaceAttributeSmoother:
         self.tracks.sort(key=lambda t: (
             (t["locked"] or t["last_good"] or {"t": 0.0})["t"]))
         self.tracks = self.tracks[-self.max_tracks:]
-
-    def latest(self):
-        """Most recent locked/good (gender, age, conf) across all tracks."""
-        best = None
-        for track in self.tracks:
-            good = track["locked"] or track["last_good"]
-            if good and (best is None or good["t"] > best["t"]):
-                best = good
-        return best
 
     def add(self, faces):
         """Store instant predictions. Only call when a fresh face infer ran."""
@@ -238,13 +229,14 @@ class FaceAttributeSmoother:
             elif track["last_good"]:
                 value, method, samples_n = track["last_good"], "sticky", 0
             else:
-                good = self.latest()
-                if good:
-                    value, method = good, "sticky-global"
-                else:
-                    value = {"gender": "Unknown", "age": 0, "conf": 0.0}
-                    method = "default"
-                samples_n = 0
+                # Cross-person contamination korbo na: onno face-er age/gender
+                # kothono copy korbo na. Nije-er last value (ba Unknown) rakho.
+                value = {
+                    "gender": face.get("gender") or "Unknown",
+                    "age": int(face.get("age") or 0),
+                    "conf": float(face.get("gconf") or 0.0),
+                }
+                method, samples_n = "sticky-self", 0
 
             face.update({
                 "gender": value["gender"],

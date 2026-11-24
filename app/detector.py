@@ -402,9 +402,8 @@ class HumanDetector:
                 gender = face.get("gender") or "Unknown"
                 age = face.get("age", 0)
             else:
-                good = self.attr_smoother.latest()
-                gender = good["gender"] if good else "Unknown"
-                age = good["age"] if good else 0
+                # Onno manush-er age/gender copy korbo na.
+                gender, age = "Unknown", 0
             label = f"Human {gender} {age}y {d['conf']:.2f}"
             color = (0, 255, 0)  # green
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
