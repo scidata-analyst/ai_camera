@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+from ..geometry import iou
 from ..models import Detection, Face
 from .ports import PersonDetector
 
@@ -20,6 +21,8 @@ class HumanDetectionService:
         self._last: list[Detection] = []
         self._last_time = 0.0
         self._has_result = False
+        self._tracks: list = []
+        self._next_id = 0
         self.last_ms = 0.0
 
     @property
@@ -36,6 +39,29 @@ class HumanDetectionService:
         return (detection["conf"] >= self.conf and
                 (y2 - y1) >= self.min_height)
 
+    def _assign_ids(self, detections: list[Detection]) -> None:
+        used = set()
+        for detection in detections:
+            box = detection["box"]
+            best, best_iou = None, 0.0
+            for track in self._tracks:
+                if track["id"] in used:
+                    continue
+                overlap = iou(box, track["box"])
+                if overlap > best_iou:
+                    best, best_iou = track, overlap
+            if best is not None and best_iou >= 0.3:
+                detection["person_id"] = best["id"]
+                best["box"] = box
+                used.add(best["id"])
+            else:
+                self._next_id += 1
+                detection["person_id"] = self._next_id
+                self._tracks.append({"id": self._next_id, "box": box})
+                used.add(self._next_id)
+        self._tracks = [track for track in self._tracks
+                        if track["id"] in used][-20:]
+
     def detect(self, frame) -> list[Detection]:
         self._frame_no += 1
         run = (self._frame_no % self.detect_every == 0) or not self._has_result
@@ -48,6 +74,7 @@ class HumanDetectionService:
             results = self.detector.detect(frame)
             self.last_ms = round((time.perf_counter() - started) * 1000, 1)
             self._last = [dict(d) for d in results if self._keep(d)]
+            self._assign_ids(self._last)
             self._last_time = time.time()
             self._has_result = True
         else:

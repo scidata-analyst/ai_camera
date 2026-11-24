@@ -105,7 +105,14 @@ class AttributeAggregator:
     def _center(box) -> tuple[float, float]:
         return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
 
-    def _match(self, box: list, source=None):
+    def _match(self, face):
+        person_id = face.get("person_id")
+        if person_id is not None:
+            for track in self.tracks:
+                if track.get("id") == person_id:
+                    return track
+        box = self._box(face)
+        source = face.get("human_box")
         reference = source if source is not None else box
         cx, cy = self._center(reference)
         size = max(1, min(reference[2] - reference[0],
@@ -140,9 +147,10 @@ class AttributeAggregator:
             if gender not in ("Male", "Female") or age in (None, 0):
                 continue
             box = self._box(face)
-            track = self._match(box, face.get("human_box"))
+            track = self._match(face)
             if track is None:
-                track = {"box": box, "samples": collections.deque()}
+                track = {"id": face.get("person_id"), "box": box,
+                         "samples": collections.deque()}
                 self.tracks.append(track)
             track["box"] = box
             track["samples"].append((now, int(age), str(gender)))
@@ -152,7 +160,7 @@ class AttributeAggregator:
         now = time.time()
         self._prune(now)
         for face in faces:
-            track = self._match(self._box(face), face.get("human_box"))
+            track = self._match(face)
             if track is None or not track["samples"]:
                 continue
             samples = track["samples"]

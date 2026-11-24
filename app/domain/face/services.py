@@ -65,6 +65,9 @@ class FaceDetectionService:
                     face["landmarks"] = [
                         [int(px) + x1, int(py) + y1] for px, py in landmarks]
                 face["human_box"] = list(human["box"])
+                person_id = human.get("person_id")
+                if person_id is not None:
+                    face["person_id"] = person_id
                 found.append(face)
         unique: list[Face] = []
         for face in found:

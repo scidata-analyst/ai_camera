@@ -55,6 +55,14 @@ class OpenCVFrameRenderer(FrameRenderer):
                         used: set[int] | None = None):
         used = used if used is not None else set()
         box = detection["box"]
+        person_id = detection.get("person_id")
+        if person_id is not None:
+            same = [face for face in faces
+                    if face.get("person_id") == person_id
+                    and id(face) not in used]
+            if same:
+                return min(same, key=lambda face: OpenCVFrameRenderer._distance(
+                    face["box"], box))
         owned = []
         for face in faces:
             if id(face) in used:
