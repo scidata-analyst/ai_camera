@@ -49,7 +49,7 @@ SPECS = {
     "AGE_GENDER_BACKEND": {"group": "Age / Gender", "type": "text", "default": "rknn", "live": False, "choices": ["rknn", "off"]},
     "AGE_GENDER_MODEL": {"group": "Age / Gender", "type": "text", "default": DEFAULT_AGE_ONNX, "live": False},
     "AGE_GENDER_RKNN_MODEL": {"group": "Age / Gender", "type": "text", "default": DEFAULT_AGE_RKNN, "live": False},
-    "AGE_GENDER_ALIGN": {"group": "Age / Gender", "type": "text", "default": "roll", "live": True, "choices": list(ALIGN_MODES)},
+    "AGE_GENDER_ALIGN": {"group": "Age / Gender", "type": "text", "default": "arcface", "live": True, "choices": list(ALIGN_MODES)},
     "HEADPOSE_ENABLE": {"group": "Head Pose", "type": "bool", "default": "1", "live": False},
     "HEADPOSE_BACKEND": {"group": "Head Pose", "type": "text", "default": "rknn", "live": False, "choices": ["rknn", "off"]},
     "HEADPOSE_MODEL": {"group": "Head Pose", "type": "text", "default": DEFAULT_HEADPOSE_ONNX, "live": False},

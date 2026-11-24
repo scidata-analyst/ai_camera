@@ -91,9 +91,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        align = _text("AGE_GENDER_ALIGN", "roll").lower()
+        align = _text("AGE_GENDER_ALIGN", "arcface").lower()
         if align not in ALIGN_MODES:
-            align = "roll"
+            align = "arcface"
         return cls(
             model_name=_text("MODEL_NAME", "models/yolo11n.pt"),
             conf=_float("CONF_THRESHOLD", 0.5),

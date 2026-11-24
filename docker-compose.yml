@@ -48,8 +48,8 @@ services:
       - FACE_MIN_SIZE=60
       - FACE_BLUR=80
       - AGE_GENDER_BACKEND=rknn
-      - AGE_GENDER_RKNN_MODEL=/app/models/genderage-rk3576.rknn
-      - AGE_GENDER_ALIGN=roll
+      - AGE_GENDER_RKNN_MODEL=/app/models/fairface-rk3576.rknn
+      - AGE_GENDER_ALIGN=arcface
       - HEADPOSE_ENABLE=1
       - HEADPOSE_BACKEND=rknn
       - HEADPOSE_RKNN_MODEL=/app/models/whenet-rk3576.rknn

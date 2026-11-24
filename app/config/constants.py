@@ -21,14 +21,19 @@ PERSON_CLASS_NAME = "person"
 DEFAULT_YOLO_RKNN = "/app/models/yolo11n-rk3576.rknn"
 DEFAULT_FACE_RKNN = "/app/models/RetinaFace_mobile320-rk3576.rknn"
 DEFAULT_FACE_ONNX = "/app/models/RetinaFace_mobile320.onnx"
-DEFAULT_AGE_RKNN = "/app/models/genderage-rk3576.rknn"
-DEFAULT_AGE_ONNX = "/app/models/genderage.onnx"
+DEFAULT_AGE_RKNN = "/app/models/fairface-rk3576.rknn"
+DEFAULT_AGE_ONNX = "/app/models/fairface.onnx"
 DEFAULT_HEADPOSE_RKNN = "/app/models/whenet-rk3576.rknn"
 DEFAULT_HEADPOSE_ONNX = "/app/models/whenet.onnx"
 
-AGE_INPUT_SIZE = 96
+AGE_INPUT_SIZE = 224
+LEGACY_AGE_INPUT_SIZE = 96
 FACE_DETECTOR_SIZE = 320
 WHENET_INPUT_SIZE = 224
+FAIRFACE_MEAN = (0.485, 0.456, 0.406)
+FAIRFACE_STD = (0.229, 0.224, 0.225)
+FAIRFACE_AGE_BINS = np.array(
+    [1.0, 6.0, 14.5, 24.5, 34.5, 44.5, 54.5, 64.5, 70.0], dtype=np.float32)
 
 ARCFACE_DST = np.array([
     [38.2946, 51.6963],

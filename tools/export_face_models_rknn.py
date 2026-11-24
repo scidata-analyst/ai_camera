@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import os
 import tempfile
+import urllib.request
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+FAIRFACE_URL = (
+    "https://huggingface.co/livinNector/fairface/resolve/main/fairface.onnx")
 
 
 def convert(model: Path, output: Path, target: str,
@@ -53,9 +56,13 @@ def main() -> None:
     args = parser.parse_args()
 
     retinaface = ROOT / "models/RetinaFace_mobile320.onnx"
-    genderage = ROOT / "models/genderage.onnx"
-    if not retinaface.is_file() or not genderage.is_file():
-        raise SystemExit("Missing ONNX files in models/. Download them first.")
+    if not retinaface.is_file():
+        raise SystemExit("Missing models/RetinaFace_mobile320.onnx. Download it first.")
+
+    fairface = ROOT / "models/fairface.onnx"
+    if not fairface.is_file():
+        print(f"[download] {FAIRFACE_URL}")
+        urllib.request.urlretrieve(FAIRFACE_URL, fairface)
 
     convert(
         retinaface,
@@ -64,10 +71,10 @@ def main() -> None:
     )
 
     convert(
-        genderage,
-        ROOT / "models/genderage-rk3576.rknn",
+        fairface,
+        ROOT / "models/fairface-rk3576.rknn",
         args.target, [[0, 0, 0]], [[1, 1, 1]],
-        input_name="data", input_size=(1, 3, 96, 96),
+        input_name="input", input_size=(1, 3, 224, 224),
     )
 
 
