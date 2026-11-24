@@ -74,6 +74,7 @@ class StatsPresenter:
             "age_gender_model_kind": attributes.get("model_kind"),
             "age_loaded": attributes.get("age_loaded", False),
             "age_rknn_model": attributes.get("age_rknn_model"),
+            "age_source": attributes.get("age_source"),
             "age_gender_align": attributes.get("align"),
             "face_blur_min": attributes.get("blur"),
             "headpose_enabled": self.settings.headpose_enable,

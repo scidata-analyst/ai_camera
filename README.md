@@ -4,11 +4,11 @@ Camera stream-er pipeline:
 
 - YOLO11n detects `person` and COCO objects.
 - RetinaFace detects face boxes and five landmarks.
-- FairFace estimates gender from each aligned face crop.
-- The dlib age predictor estimates age from the same crop on the NPU.
+- MiVOLO v2 (face-only) estimates gender and age from each aligned face crop.
+- FairFace and the dlib age predictor remain available as an alternative path.
 - WHENet estimates head pose / whether a face is looking at the camera.
 
-RetinaFace is the face detector. Gender comes from FairFace ResNet-34 and age comes from the dlib ResNet-10 age predictor; both run through RKNN on the NPU. MiVOLO is removed.
+RetinaFace is the face detector. By default, MiVOLO v2 supplies both age and gender through RKNN on the NPU; FairFace + dlib age stay in the image and can be selected again with `AGE_GENDER_RKNN_MODEL`.
 
 ## Code structure
 
@@ -25,7 +25,7 @@ The pipeline follows a domain-driven layout:
 | `app/domain/aggregation/` | Mean/median/mode window and per-person attribute smoothing |
 | `app/domain/headpose/` | Head-pose analyzer port |
 | `app/application/` | Frame processor and cross-domain orchestration |
-| `app/infrastructure/rknn/` | RKNN adapters for YOLO, RetinaFace, FairFace and WHENet |
+| `app/infrastructure/rknn/` | RKNN adapters for YOLO, RetinaFace, MiVOLO, FairFace, dlib age and WHENet |
 | `app/infrastructure/camera/` | OpenCV frame source |
 | `app/infrastructure/rendering/` | OpenCV drawing/overlay renderer |
 | `app/interfaces/` | FastAPI controllers, presenters and flip state |
@@ -56,11 +56,12 @@ the working tree contains small pointer files instead of the real models.
 The ONNX models are in `models/`:
 
 - `RetinaFace_mobile320.onnx` — official RKNN Model Zoo RetinaFace mobile model
+- `mivolo-face.onnx` — MiVOLO v2 face-only age/gender model, with `mivolo-face.json` metadata
 - `fairface.onnx` — FairFace ResNet-34 race/gender/age model (MIT source, CC BY 4.0 weights)
 - `dlib-age-v1.onnx` — dlib ResNet-10 age predictor, 81 age classes (CC0-1.0, contributed by Cydral Technology)
 - Existing YOLO11n and WHENet files
 
-On an x86_64 Linux PC with RKNN-Toolkit2 installed, convert RetinaFace, FairFace and the dlib age predictor for RK3576 manually:
+On an x86_64 Linux PC with RKNN-Toolkit2 installed, convert RetinaFace, MiVOLO, FairFace and the dlib age predictor for RK3576 manually:
 
 ```bash
 python tools/export_face_models_rknn.py --target rk3576
@@ -69,14 +70,15 @@ python tools/export_face_models_rknn.py --target rk3576
 This creates:
 
 - `models/RetinaFace_mobile320-rk3576.rknn`
+- `models/mivolo-face-rk3576.rknn`
 - `models/fairface-rk3576.rknn`
 - `models/dlib-age-rk3576.rknn`
 
-The age model uses the same 224×224 aligned crop as FairFace, resized to 64×64; its 81 class probabilities are combined with the dlib age weights. If the separate age model fails, FairFace's nine-bin age is used as a fallback. Gender always comes from FairFace.
+MiVOLO receives a 224×224 RGB letterbox crop of the aligned face; normalization is compiled into the RKNN model, so runtime input is `uint8` NHWC with no extra scaling. It returns male logit, female logit and a normalized age; age is decoded as `value * 94 + 48` and clamped to 1–95. The alternative FairFace path uses the same aligned crop, with dlib age on a separate 64×64 model; FairFace's nine bin estimate is only a fallback if dlib age fails.
 
-The app is **NPU-only**: YOLO, RetinaFace, FairFace, the dlib age predictor and WHENet all run through RKNNLite. CPU/ONNX fallbacks were removed — a missing or failed RKNN model makes startup fail with a clear error instead of silently using CPU. Compose only mounts `models/`; it does not start conversion.
+The app is **NPU-only**: YOLO, RetinaFace, MiVOLO, FairFace, the dlib age predictor and WHENet all run through RKNNLite. CPU/ONNX fallbacks were removed — a missing or failed RKNN model makes startup fail with a clear error instead of silently using CPU. Compose only mounts `models/`; it does not start conversion.
 
-For commercial deployment, check the pretrained model licenses first: the FairFace weights are CC BY 4.0; the dlib age weights are CC0-1.0. See the [FairFace project](https://github.com/dchen236/FairFace), the [dlib age models](https://github.com/davisking/dlib-models) and the [RKNN Model Zoo RetinaFace example](https://github.com/airockchip/rknn_model_zoo/tree/main/examples/RetinaFace).
+For commercial deployment, check the pretrained model licenses first: MiVOLO is Apache-2.0 at its source, the FairFace weights are CC BY 4.0 and the dlib age weights are CC0-1.0. See the [MiVOLO project](https://github.com/WildChlamydia/MiVOLO), the [FairFace project](https://github.com/dchen236/FairFace), the [dlib age models](https://github.com/davisking/dlib-models) and the [RKNN Model Zoo RetinaFace example](https://github.com/airockchip/rknn_model_zoo/tree/main/examples/RetinaFace).
 
 ## Main settings
 
@@ -87,10 +89,10 @@ For commercial deployment, check the pretrained model licenses first: the FairFa
 | `FACE_BACKEND` | `rknn` | RetinaFace on NPU only; `off` disables face stage |
 | `FACE_MODEL` | `/app/models/RetinaFace_mobile320.onnx` | Legacy path (unused in NPU-only mode) |
 | `FACE_RKNN_MODEL` | `/app/models/RetinaFace_mobile320-rk3576.rknn` | RetinaFace RKNN model |
-| `AGE_GENDER_BACKEND` | `rknn` | FairFace on NPU only; `off` disables it |
-| `AGE_GENDER_MODEL` | `/app/models/fairface.onnx` | Legacy path (unused in NPU-only mode) |
-| `AGE_GENDER_RKNN_MODEL` | `/app/models/fairface-rk3576.rknn` | FairFace RKNN model (gender) |
-| `AGE_RKNN_MODEL` | `/app/models/dlib-age-rk3576.rknn` | dlib age RKNN model; needs restart |
+| `AGE_GENDER_BACKEND` | `rknn` | Age/gender estimator on NPU only; `off` disables it |
+| `AGE_GENDER_MODEL` | `/app/models/mivolo-face.onnx` | Legacy path (unused in NPU-only mode) |
+| `AGE_GENDER_RKNN_MODEL` | `/app/models/mivolo-face-rk3576.rknn` | MiVOLO RKNN model; set to `fairface-rk3576.rknn` to use FairFace + dlib age |
+| `AGE_RKNN_MODEL` | `/app/models/dlib-age-rk3576.rknn` | dlib age RKNN model; used only with the FairFace path, needs restart |
 | `CONF_THRESHOLD` | `0.5` | NMS score floor for person boxes |
 | `PERSON_CONF` | `0.65` | Minimum score required for a `person` box |
 | `PERSON_MIN_H` | `0` | Minimum person-box height in pixels; `0` = no size limit |
@@ -107,11 +109,11 @@ For commercial deployment, check the pretrained model licenses first: the FairFa
 | `HEADPOSE_BACKEND` | `rknn` | Head pose on NPU only; `off` disables it |
 | `HEADPOSE_RKNN_MODEL` | `/app/models/whenet-rk3576.rknn` | WHENet RKNN model |
 
-Age and gender are visual estimates; small, blurry, profile, or poorly lit faces can reduce reliability. They do not identify a person's actual gender or exact age. Gender comes from FairFace's gender probabilities. Age comes from the dlib age predictor's 81 age classes (weighted sum); FairFace's nine age bins are used only if the separate age model fails. Predictions are collected for `INTERVAL` seconds (1 by default, changeable live from the Setting popup), then one result is published per person and the collected samples are cleared. Tracks are matched by **human-box IoU**, so multiple people keep separate results. The displayed age and gender are majority votes of that person's samples in the interval (for example, 6 male vs 4 female gives male). A tie uses the most recent prediction. Between two publish moments the last valid age/gender is held, so a failed or skipped frame never hides the label. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
+Age and gender are visual estimates; small, blurry, profile, or poorly lit faces can reduce reliability. They do not identify a person's actual gender or exact age. By default both come from MiVOLO's male/female logits and normalized age output. If `AGE_GENDER_RKNN_MODEL` is pointed at `fairface-rk3576.rknn`, gender comes from FairFace and age from the dlib 81-class predictor, with FairFace's nine age bins only as a fallback. Predictions are collected for `INTERVAL` seconds (1 by default, changeable live from the Setting popup), then one result is published per person and the collected samples are cleared. Tracks are matched by **human-box IoU**, so multiple people keep separate results. The displayed age and gender are majority votes of that person's samples in the interval (for example, 6 male vs 4 female gives male). A tie uses the most recent prediction. Between two publish moments the last valid age/gender is held, so a failed or skipped frame never hides the label. Text labels are drawn only on human boxes; face boxes keep rectangles/landmarks without text.
 
 The page is served from `app/interfaces/controllers/index.html`. Ubuntu Sans is bundled at `app/interfaces/controllers/UbuntuSans.ttf` and served at `/ubuntu-sans.ttf`, so both the page and the video overlay use the same font without network access. The **Setting** popup controls every supported environment variable. Fields marked `needs restart` are saved but require a container restart; all other fields apply immediately. Saved values are written to `SETTINGS_FILE` (default `app/config/saved_settings.json`; Compose mounts `./settings` at `/app/config`), so they survive restarts. **Reset All** restores the startup values and removes the saved file. If `API_TOKEN` is set, open `/?token=<token>` so the page can authenticate its API requests.
 
-Quality gates: faces smaller than `FACE_MIN_SIZE` or crops with Laplacian variance below `FACE_BLUR` are skipped, so a blurry frame does not add a bad sample. `AGE_GENDER_ALIGN=arcface` uses the five RetinaFace landmarks for full alignment, matching FairFace's aligned training chips; `roll` only levels the eye line and `box` uses a plain crop. `/api/faces` reports `sharpness`, `blurry`, `raw_age` and `align` for tuning.
+Quality gates: faces smaller than `FACE_MIN_SIZE` or crops with Laplacian variance below `FACE_BLUR` are skipped, so a blurry frame does not add a bad sample. `AGE_GENDER_ALIGN=arcface` uses the five RetinaFace landmarks for full alignment; `roll` only levels the eye line and `box` uses a plain crop. MiVOLO receives the aligned crop as a 224×224 RGB letterbox; FairFace and dlib use their own fixed crops. `/api/faces` reports `sharpness`, `blurry`, `raw_age` and `align` for tuning.
 
 ## Existing exporters
 

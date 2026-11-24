@@ -24,6 +24,8 @@ DEFAULT_FACE_ONNX = "/app/models/RetinaFace_mobile320.onnx"
 DEFAULT_AGE_RKNN = "/app/models/fairface-rk3576.rknn"
 DEFAULT_AGE_ONNX = "/app/models/fairface.onnx"
 DEFAULT_AGE_ONLY_RKNN = "/app/models/dlib-age-rk3576.rknn"
+DEFAULT_MIVOLO_RKNN = "/app/models/mivolo-face-rk3576.rknn"
+DEFAULT_MIVOLO_ONNX = "/app/models/mivolo-face.onnx"
 DEFAULT_HEADPOSE_RKNN = "/app/models/whenet-rk3576.rknn"
 DEFAULT_HEADPOSE_ONNX = "/app/models/whenet.onnx"
 
@@ -40,6 +42,11 @@ DLIB_AGE_MEAN = (122.781998, 117.000999, 104.297997)
 DLIB_AGE_SCALE = 256.0
 DLIB_AGE_WEIGHTS = np.array(
     [0.25] + list(range(1, 81)), dtype=np.float32)
+MIVOLO_AGE_MIN = 1.0
+MIVOLO_AGE_MAX = 95.0
+MIVOLO_AGE_AVG = 48.0
+MIVOLO_MEAN = (0.485, 0.456, 0.406)
+MIVOLO_STD = (0.229, 0.224, 0.225)
 
 ARCFACE_DST = np.array([
     [38.2946, 51.6963],

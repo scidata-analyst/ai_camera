@@ -5,10 +5,10 @@ from dataclasses import dataclass
 
 from .constants import (
     ALIGN_MODES,
-    DEFAULT_AGE_ONNX,
     DEFAULT_AGE_ONLY_RKNN,
-    DEFAULT_AGE_RKNN,
     DEFAULT_FACE_ONNX,
+    DEFAULT_MIVOLO_ONNX,
+    DEFAULT_MIVOLO_RKNN,
     DEFAULT_FACE_RKNN,
     DEFAULT_HEADPOSE_ONNX,
     DEFAULT_HEADPOSE_RKNN,
@@ -124,8 +124,8 @@ class Settings:
             face_onnx_path=_text("FACE_MODEL", DEFAULT_FACE_ONNX),
             face_rknn_path=_text("FACE_RKNN_MODEL", DEFAULT_FACE_RKNN),
             age_backend=_text("AGE_GENDER_BACKEND", "rknn").lower(),
-            age_onnx_path=_text("AGE_GENDER_MODEL", DEFAULT_AGE_ONNX),
-            age_rknn_path=_text("AGE_GENDER_RKNN_MODEL", DEFAULT_AGE_RKNN),
+            age_onnx_path=_text("AGE_GENDER_MODEL", DEFAULT_MIVOLO_ONNX),
+            age_rknn_path=_text("AGE_GENDER_RKNN_MODEL", DEFAULT_MIVOLO_RKNN),
             age_only_rknn_path=_text("AGE_RKNN_MODEL", DEFAULT_AGE_ONLY_RKNN),
             face_blur=_float("FACE_BLUR", 80.0),
             age_align=align,
