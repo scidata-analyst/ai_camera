@@ -53,8 +53,7 @@ class Settings:
     imgsz: int
     jpeg_quality: int
     stream_fps: float
-    window_sec: float
-    count_window: float
+    interval: float
     face_enable: bool
     headpose_enable: bool
     face_min_size: int
@@ -101,8 +100,7 @@ class Settings:
             imgsz=_int("IMG_SIZE", 320),
             jpeg_quality=_int("JPEG_QUALITY", 60),
             stream_fps=_float("STREAM_FPS", 25.0),
-            window_sec=_float("SMOOTH_WINDOW", 1.0),
-            count_window=_float("COUNT_WINDOW", 1.0),
+            interval=_float("INTERVAL", 1.0),
             face_enable=_bool("FACE_ENABLE", True),
             headpose_enable=_bool("HEADPOSE_ENABLE", True),
             face_min_size=_int("FACE_MIN_SIZE", 60),

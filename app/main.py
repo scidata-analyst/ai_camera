@@ -58,7 +58,7 @@ def _build_runtime() -> SimpleNamespace:
     age_service = AgeService()
     gender_service = GenderService()
     quality = FaceQualityService(settings.face_blur)
-    attribute_aggregator = AttributeAggregator(window_sec=settings.window_sec)
+    attribute_aggregator = AttributeAggregator(interval_sec=settings.interval)
     attributes = (AttributeRecognitionService(
         estimator, quality, age_service, gender_service, attribute_aggregator,
         settings.face_min_size, settings.age_align) if estimator is not None
@@ -75,7 +75,7 @@ def _build_runtime() -> SimpleNamespace:
         person_detector, settings.conf, settings.person_min_h,
         settings.person_require_face, settings.detect_every,
         settings.det_stale_sec)
-    count_aggregator = CountAggregator(settings.count_window)
+    count_aggregator = CountAggregator(settings.interval)
     renderer = OpenCVFrameRenderer()
     processor = FrameProcessor(human_detection, face_detection, attributes,
                                headpose, count_aggregator, renderer)

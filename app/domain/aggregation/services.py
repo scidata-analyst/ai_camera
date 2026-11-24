@@ -27,49 +27,52 @@ def _stats(values):
 
 
 class CountAggregator:
-    def __init__(self, window_sec: float = 1.0):
-        self.window_sec = float(window_sec)
-        self.history: collections.deque = collections.deque()
+    def __init__(self, interval_sec: float = 1.0):
+        self.interval_sec = float(interval_sec)
+        self.history: list = []
         self._cached = {key: (dict(value) if isinstance(value, dict) else value)
                         for key, value in EMPTY_STATS.items()}
         self._cached["updated_at"] = time.time()
-        self._last_publish = 0.0
+        self._last_publish = time.time()
+
+    def set_interval(self, interval_sec: float) -> None:
+        self.interval_sec = float(interval_sec)
+        self.history.clear()
+        self._last_publish = time.time()
 
     def add(self, human: int, non_human: int, face: int = 0,
             male: int = 0, female: int = 0):
         now = time.time()
         self.history.append((now, int(human), int(non_human),
                              int(face), int(male), int(female)))
-        cutoff = now - self.window_sec
-        while self.history and self.history[0][0] < cutoff:
-            self.history.popleft()
-
-        if now - self._last_publish >= self.window_sec:
-            self._last_publish = now
-            human_values = [item[1] for item in self.history]
-            other_values = [item[2] for item in self.history]
-            face_values = [item[3] for item in self.history]
-            male_values = [item[4] for item in self.history]
-            female_values = [item[5] for item in self.history]
-            human_stats = _stats(human_values)
-            other_stats = _stats(other_values)
-            face_stats = _stats(face_values)
-            male_stats = _stats(male_values)
-            female_stats = _stats(female_values)
-            self._cached = {
-                "human": human_stats,
-                "non_human": other_stats,
-                "face": face_stats,
-                "male": male_stats,
-                "female": female_stats,
-                "stable_human": human_stats["mode"],
-                "stable_non_human": other_stats["mode"],
-                "stable_face": face_stats["mode"],
-                "stable_male": male_stats["mode"],
-                "stable_female": female_stats["mode"],
-                "samples": len(human_values),
-                "updated_at": now,
-            }
+        if now - self._last_publish < self.interval_sec:
+            return self._cached
+        human_values = [item[1] for item in self.history]
+        other_values = [item[2] for item in self.history]
+        face_values = [item[3] for item in self.history]
+        male_values = [item[4] for item in self.history]
+        female_values = [item[5] for item in self.history]
+        human_stats = _stats(human_values)
+        other_stats = _stats(other_values)
+        face_stats = _stats(face_values)
+        male_stats = _stats(male_values)
+        female_stats = _stats(female_values)
+        self._cached = {
+            "human": human_stats,
+            "non_human": other_stats,
+            "face": face_stats,
+            "male": male_stats,
+            "female": female_stats,
+            "stable_human": human_stats["mode"],
+            "stable_non_human": other_stats["mode"],
+            "stable_face": face_stats["mode"],
+            "stable_male": male_stats["mode"],
+            "stable_female": female_stats["mode"],
+            "samples": len(human_values),
+            "updated_at": now,
+        }
+        self.history.clear()
+        self._last_publish = now
         return self._cached
 
     @property
@@ -78,14 +81,14 @@ class CountAggregator:
 
 
 class AttributeAggregator:
-    def __init__(self, window_sec: float = 1.0):
-        self.window_sec = float(window_sec)
+    def __init__(self, interval_sec: float = 1.0):
+        self.interval_sec = float(interval_sec)
         self.tracks: dict = {}
         self._last_good: collections.OrderedDict = collections.OrderedDict()
         self._last_publish = time.time()
 
-    def set_window(self, window_sec: float) -> None:
-        self.window_sec = float(window_sec)
+    def set_interval(self, interval_sec: float) -> None:
+        self.interval_sec = float(interval_sec)
         self._last_publish = time.time()
         self.tracks.clear()
 
@@ -104,7 +107,7 @@ class AttributeAggregator:
 
     def results(self) -> dict:
         now = time.time()
-        if now - self._last_publish < self.window_sec:
+        if now - self._last_publish < self.interval_sec:
             return {person_id: dict(result)
                     for person_id, result in self._last_good.items()}
         fresh = {}

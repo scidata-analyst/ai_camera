@@ -80,9 +80,9 @@ async function tick(){
     const j = await r.json();
     const s = j.smoothed;
     document.getElementById('s').innerHTML =
-      `Stable(${j.count_window}s) <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
+      `Interval ${j.interval}s | Stable <b>H:${s.stable_human} F:${s.stable_face}</b> ` +
       `M:${s.stable_male} W:${s.stable_female} Look:${j.instant.looking} | ` +
-      `infer:${j.infer_fps}fps age/gender ${j.window_sec}s:${j.age_gender.runs} ` +
+      `infer:${j.infer_fps}fps age/gender:${j.age_gender.runs} ` +
       `${j.age_gender.last_ms}ms`;
     document.getElementById('fh').innerText = j.flip.h ? 'ON' : 'OFF';
     document.getElementById('fv').innerText = j.flip.v ? 'ON' : 'OFF';

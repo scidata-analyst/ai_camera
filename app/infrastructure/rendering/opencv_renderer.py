@@ -46,7 +46,7 @@ class OpenCVFrameRenderer(FrameRenderer):
             f"M:{values['male_n']}[{values['stable_male']}] "
             f"W:{values['female_n']}[{values['stable_female']}] "
             f"Look:{values['look_n']} FPS:{values['fps']:.1f}")
-        seconds = f"{float(values['window_sec']):g}s"
+        seconds = f"{float(values['interval_sec']):g}s"
         sub = (f"{seconds} avg mean:{values['mean']} "
                f"median:{values['median']} mode:{values['mode']}")
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 56), (0, 0, 0), -1)

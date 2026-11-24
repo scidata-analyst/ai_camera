@@ -38,8 +38,7 @@ services:
       - FRAME_HEIGHT=480
       - JPEG_QUALITY=95
       - STREAM_FPS=25
-      - SMOOTH_WINDOW=1.0
-      - COUNT_WINDOW=1.0
+      - INTERVAL=1.0
       - DETECT_EVERY=2
       - FACE_EVERY=1
       - FACE_ENABLE=1
