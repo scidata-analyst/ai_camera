@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
+
 import cv2
 import numpy as np
 
 from ...application.ports import FrameRenderer
+from ...domain.geometry import iou
 
 
 class OpenCVFrameRenderer(FrameRenderer):
@@ -17,11 +20,14 @@ class OpenCVFrameRenderer(FrameRenderer):
 
     def draw_humans(self, frame: np.ndarray, detections: list[dict],
                     faces: list[dict]) -> None:
+        used: set[int] = set()
         for detection in detections:
             if detection["kind"] != "human":
                 continue
             x1, y1, x2, y2 = detection["box"]
-            face = self._face_for_human(detection, faces)
+            face = self._face_for_human(detection, faces, used)
+            if face is not None:
+                used.add(id(face))
             gender = face.get("gender") if face is not None else None
             age = face.get("age") if face is not None else None
             if gender not in (None, "", "Unknown") and age:
@@ -37,22 +43,45 @@ class OpenCVFrameRenderer(FrameRenderer):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
     @staticmethod
-    def _face_for_human(detection: dict, faces: list[dict]):
-        x1, y1, x2, y2 = detection["box"]
-        best, best_iou = None, 0.0
-        human_area = max(1, (x2 - x1) * (y2 - y1))
+    def _distance(box, target) -> float:
+        cx = (box[0] + box[2]) / 2.0
+        cy = (box[1] + box[3]) / 2.0
+        tx = (target[0] + target[2]) / 2.0
+        ty = (target[1] + target[3]) / 2.0
+        return math.hypot(cx - tx, cy - ty)
+
+    @staticmethod
+    def _face_for_human(detection: dict, faces: list[dict],
+                        used: set[int] | None = None):
+        used = used if used is not None else set()
+        box = detection["box"]
+        owned = []
         for face in faces:
-            fx1, fy1, fx2, fy2 = face["box"]
-            ix1, iy1 = max(x1, fx1), max(y1, fy1)
-            ix2, iy2 = min(x2, fx2), min(y2, fy2)
-            inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-            if inter <= 0:
+            if id(face) in used:
                 continue
-            overlap = inter / min(human_area,
-                                  max(1, (fx2 - fx1) * (fy2 - fy1)))
-            if overlap > best_iou:
-                best, best_iou = face, overlap
-        return best
+            human_box = face.get("human_box")
+            if human_box and iou(human_box, box) >= 0.5:
+                owned.append(face)
+        if owned:
+            return min(owned, key=lambda face: OpenCVFrameRenderer._distance(
+                face["box"], box))
+        cx = (box[0] + box[2]) / 2.0
+        cy = (box[1] + box[3]) / 2.0
+        candidates = []
+        for face in faces:
+            if id(face) in used:
+                continue
+            fx1, fy1, fx2, fy2 = face["box"]
+            fcx = (fx1 + fx2) / 2.0
+            fcy = (fy1 + fy2) / 2.0
+            if not (fx1 <= fcx <= fx2 and fy1 <= fcy <= fy2):
+                continue
+            if not (box[0] <= fcx <= box[2] and box[1] <= fcy <= box[3]):
+                continue
+            candidates.append((math.hypot(fcx - cx, fcy - cy), face))
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: item[0])[1]
 
     def draw_overlay(self, frame: np.ndarray, values: dict) -> None:
         header = (

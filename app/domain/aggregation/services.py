@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import math
 import statistics
 import time
 
@@ -100,13 +101,28 @@ class AttributeAggregator:
     def _box(face) -> list:
         return [int(value) for value in face.get("human_box") or face["box"]]
 
-    def _match(self, box: list):
-        best, best_iou = None, 0.0
+    @staticmethod
+    def _center(box) -> tuple[float, float]:
+        return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+
+    def _match(self, box: list, source=None):
+        reference = source if source is not None else box
+        cx, cy = self._center(reference)
+        size = max(1, min(reference[2] - reference[0],
+                          reference[3] - reference[1]))
+        best, best_score = None, 0.0
         for track in self.tracks:
-            overlap = self._iou(box, track["box"])
-            if overlap > best_iou:
-                best, best_iou = track, overlap
-        return best if best_iou >= self.iou_thr else None
+            overlap = self._iou(reference, track["box"])
+            if overlap < self.iou_thr:
+                continue
+            tx, ty = self._center(track["box"])
+            distance = math.hypot(cx - tx, cy - ty)
+            if distance > size * 0.15 and overlap < 0.8:
+                continue
+            score = overlap - distance / size
+            if score > best_score:
+                best, best_score = track, score
+        return best
 
     def _prune(self, now: float):
         cutoff = now - self.window_sec
@@ -124,7 +140,7 @@ class AttributeAggregator:
             if gender not in ("Male", "Female") or age in (None, 0):
                 continue
             box = self._box(face)
-            track = self._match(box)
+            track = self._match(box, face.get("human_box"))
             if track is None:
                 track = {"box": box, "samples": collections.deque()}
                 self.tracks.append(track)
@@ -136,7 +152,7 @@ class AttributeAggregator:
         now = time.time()
         self._prune(now)
         for face in faces:
-            track = self._match(self._box(face))
+            track = self._match(self._box(face), face.get("human_box"))
             if track is None or not track["samples"]:
                 continue
             samples = track["samples"]
