@@ -19,7 +19,7 @@ STREAM_FPS = float(os.getenv("STREAM_FPS", "25"))
 WINDOW_SEC = float(os.getenv("SMOOTH_WINDOW", "1.0"))  # 1 sec por por stable update
 FACE_ENABLE = os.getenv("FACE_ENABLE", "1") == "1"
 HEADPOSE_ENABLE = os.getenv("HEADPOSE_ENABLE", "1") == "1"
-FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "0"))  # 0 = sob face-e age/gender
+FACE_MIN_SIZE = int(os.getenv("FACE_MIN_SIZE", "60"))  # choto face-e age/gender skip
 FLIP_H = os.getenv("FLIP_H", "0") == "1"
 FLIP_V = os.getenv("FLIP_V", "0") == "1"
 
@@ -192,6 +192,12 @@ def health():
             "age_gender_backend": age_gender_backend,
             "age_gender_model": getattr(age_gender, "onnx_path", None),
             "age_gender_rknn_model": getattr(age_gender, "rknn_path", None),
+            "age_gender_align": getattr(age_gender, "align_mode", None),
+            "face_blur_min": getattr(age_gender, "blur_thr", None),
+            "age_calibration": {
+                "scale": getattr(age_gender, "age_scale", None),
+                "bias": getattr(age_gender, "age_bias", None),
+            },
             "headpose_enabled": HEADPOSE_ENABLE,
             "headpose_loaded": detector.headpose_enabled,
             "infer_fps": round(_infer_fps, 1)}
