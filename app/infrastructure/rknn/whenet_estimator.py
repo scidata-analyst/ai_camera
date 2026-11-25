@@ -29,10 +29,8 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
         self._ttl = settings.headpose_ttl
         self._iou_thr = 0.4
         if not self.enabled or settings.headpose_backend == "off":
-
             return
         if settings.headpose_backend not in ("rknn", ""):
-
             raise RuntimeError(
                 f"HEADPOSE_BACKEND={settings.headpose_backend!r} is disabled "
                 "in NPU-only mode")
@@ -61,7 +59,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             except ImportError:
                 outputs = self.rknn.inference(inputs=[blob])
             if not outputs:
-
                 raise RuntimeError("RKNN returned no outputs")
             rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
         return np.asarray(rows, dtype=np.float32)
@@ -82,7 +79,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
         with self._clock:
             for face in faces:
                 if "looking" not in face:
-
                     continue
                 stamp = float(face.get("t", now))
                 entry = {
@@ -97,20 +93,16 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 replaced = False
                 for cached in self._cache:
                     if iou(face["box"], cached["box"]) >= self._iou_thr:
-
                         if stamp >= cached.get("stamp", 0.0):
-
                             cached.update(entry)
                         replaced = True
                         break
                 if not replaced:
-
                     self._cache.append(entry)
         return faces
 
     def fill_from_cache(self, faces: list[Face]) -> list[Face]:
         if self.rknn is None:
-
             return faces
         now = time.time()
         with self._clock:
@@ -119,7 +111,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 for cached in self._cache:
                     overlap = iou(face["box"], cached["box"])
                     if overlap > best_iou:
-
                         best, best_iou = cached, overlap
                 if best is not None and best_iou >= self._iou_thr \
                         and now - best["t"] <= self._ttl:
@@ -135,7 +126,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
     def predict_frame(self, frame: np.ndarray, faces: list[Face],
                       min_side: int = 40) -> list[Face]:
         if self.rknn is None:
-
             return faces
         height, width = frame.shape[:2]
         blobs, indexes = [], []
@@ -143,7 +133,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             x1, y1, x2, y2 = face["box"]
             box_width, box_height = x2 - x1, y2 - y1
             if min(box_width, box_height) < min_side:
-
                 face.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
                              "looking": False})
                 continue
@@ -153,7 +142,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             yb = min(int(y2 + box_height / 10), height)
             crop = frame[ya:yb, xa:xb]
             if crop.size == 0:
-
                 face.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
                              "looking": False})
                 continue
@@ -167,7 +155,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 face.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0,
                              "looking": False})
         if blobs:
-
             try:
                 batch = np.stack(blobs, axis=0).astype(np.float32)
                 output = self._infer(batch)

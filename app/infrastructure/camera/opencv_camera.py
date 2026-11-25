@@ -15,14 +15,14 @@ class OpenCVCamera(FrameSource):
         if isinstance(source, str) and source.isdigit():
             source = int(source)
 
-        self.source = source
-        self.width = int(width)
-        self.height = int(height)
-        self.cap = None
-        self.frame: np.ndarray | None = None
-        self.running = False
-        self.lock = threading.Lock()
-        self._connected = False
+        self.source                     = source
+        self.width                      = int(width)
+        self.height                     = int(height)
+        self.cap                        = None
+        self.frame: np.ndarray | None   = None
+        self.running                    = False
+        self.lock                       = threading.Lock()
+        self._connected                 = False
         self._connect()
 
     @property
@@ -32,11 +32,12 @@ class OpenCVCamera(FrameSource):
     def _connect(self) -> None:
         try:
             if self.cap is not None:
-
                 self.cap.release()
         except Exception:
             pass
+
         self.cap = cv2.VideoCapture(self.source)
+        
         if self.cap.isOpened():
             try:
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -54,14 +55,12 @@ class OpenCVCamera(FrameSource):
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self._connected = True
-
         else:
             self._connected = False
 
     def start(self) -> None:
         if self.running:
             return
-
         self.running = True
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -84,12 +83,10 @@ class OpenCVCamera(FrameSource):
                     with self.lock:
                         self.frame = frame
                     time.sleep(0.005)
-
                 else:
                     self._connected = False
                     time.sleep(0.5)
                     self._connect()
-
             else:
                 with self.lock:
                     self.frame = self._synthetic()
@@ -99,7 +96,6 @@ class OpenCVCamera(FrameSource):
         with self.lock:
             if self.frame is not None:
                 return self.frame.copy()
-
         return self._synthetic()
 
     def stop(self) -> None:

@@ -72,30 +72,22 @@ def _coerce(key: str, value) -> str:
     spec = SPECS[key]
     kind = spec["type"]
     if isinstance(value, bool):
-
         raw = "1" if value else "0"
     else:
-
         raw = str(value).strip()
     if kind == "bool":
-
         lowered = raw.lower()
         if lowered in ("1", "true", "yes", "on"):
-
             return "1"
         if lowered in ("0", "false", "no", "off"):
-
             return "0"
         raise ValueError(f"{key} must be 0/1/true/false, got {raw!r}")
     if kind == "int":
-
         return str(int(raw))
     if kind == "float":
-
         return str(float(raw))
     choices = spec.get("choices")
     if choices and raw not in choices:
-
         raise ValueError(f"{key} must be one of {choices}, got {raw!r}")
     return raw
 
@@ -123,7 +115,6 @@ def load_saved() -> None:
     except (OSError, ValueError):
         return
     if not isinstance(data, dict):
-
         return
     for key, value in data.items():
         if key in SPECS:
@@ -136,7 +127,6 @@ def load_saved() -> None:
 def update(values: dict) -> list[dict]:
     unknown = [key for key in values if key not in SPECS]
     if unknown:
-
         raise ValueError(f"unknown setting: {unknown[0]}")
     merged = current()
     for key, value in values.items():

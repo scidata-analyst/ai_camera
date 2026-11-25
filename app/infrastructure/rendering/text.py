@@ -12,7 +12,6 @@ _FONTS: dict[int, ImageFont.FreeTypeFont] = {}
 
 def font(size: int) -> ImageFont.FreeTypeFont:
     if size not in _FONTS:
-
         _FONTS[size] = ImageFont.truetype(str(FONT_PATH), size)
     return _FONTS[size]
 

@@ -34,7 +34,6 @@ class HumanDetectionService:
 
     def _keep(self, detection: Detection) -> bool:
         if detection["kind"] != "human":
-
             return False
         x1, y1, x2, y2 = detection["box"]
         return (detection["conf"] >= self.conf and
@@ -47,19 +46,15 @@ class HumanDetectionService:
             best, best_iou = None, 0.0
             for track in self._tracks:
                 if track["id"] in used:
-
                     continue
                 overlap = iou(box, track["box"])
                 if overlap > best_iou:
-
                     best, best_iou = track, overlap
             if best is not None and best_iou >= 0.3:
-
                 detection["person_id"] = best["id"]
                 best["box"] = box
                 used.add(best["id"])
             else:
-
                 self._next_id += 1
                 detection["person_id"] = self._next_id
                 self._tracks.append({"id": self._next_id, "box": box})
@@ -75,7 +70,6 @@ class HumanDetectionService:
             self._last = []
             run = True
         if run:
-
             started = time.perf_counter()
             results = self.detector.detect(frame)
             self.last_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -84,7 +78,6 @@ class HumanDetectionService:
             self._last_time = time.time()
             self._has_result = True
         else:
-
             self._last = [dict(d) for d in self._last if self._keep(d)]
         return [dict(d) for d in self._last]
 

@@ -14,7 +14,6 @@ def iou(a, b) -> float:
     x2, y2 = min(a[2], b[2]), min(a[3], b[3])
     inter = max(0, x2 - x1) * max(0, y2 - y1)
     if inter <= 0:
-
         return 0.0
     area = ((a[2] - a[0]) * (a[3] - a[1]) +
             (b[2] - b[0]) * (b[3] - b[1]))
@@ -26,7 +25,6 @@ def intersection_over_smaller(a, b) -> float:
     x2, y2 = min(a[2], b[2]), min(a[3], b[3])
     inter = max(0, x2 - x1) * max(0, y2 - y1)
     if inter <= 0:
-
         return 0.0
     human_area = max(1, (a[2] - a[0]) * (a[3] - a[1]))
     face_area = max(1, (b[2] - b[0]) * (b[3] - b[1]))
@@ -62,7 +60,6 @@ def sharpness(frame: np.ndarray, box) -> float:
     h, w = frame.shape[:2]
     xa, ya, xb, yb = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
     if xb - xa < 2 or yb - ya < 2:
-
         return 0.0
     gray = cv2.cvtColor(frame[ya:yb, xa:xb], cv2.COLOR_BGR2GRAY)
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -71,7 +68,6 @@ def sharpness(frame: np.ndarray, box) -> float:
 def landmarks(face: dict) -> np.ndarray | None:
     value = face.get("landmarks")
     if value is None or len(value) != 5:
-
         return None
     try:
         points = np.asarray(value, dtype=np.float32).reshape(5, 2)
@@ -163,7 +159,6 @@ def nms(boxes: np.ndarray, scores: np.ndarray,
         i = int(order[0])
         kept.append(i)
         if order.size == 1:
-
             break
         rest = order[1:]
         xx1 = np.maximum(x1[i], x1[rest])

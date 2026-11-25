@@ -37,9 +37,7 @@ def ensure_mivolo() -> Path:
     onnx = ROOT / "models/mivolo-face.onnx"
     report = ROOT / "models/mivolo-face.json"
     if onnx.is_file() and report.is_file():
-
         if sha256(onnx) != MIVOLO_ONNX_SHA256:
-
             raise SystemExit(f"Checksum mismatch: {onnx}")
         return onnx
     with tempfile.TemporaryDirectory(prefix="mivolo-onnx-") as tmp:
@@ -47,14 +45,12 @@ def ensure_mivolo() -> Path:
         print(f"[download] {MIVOLO_ZIP_URL}")
         urllib.request.urlretrieve(MIVOLO_ZIP_URL, archive)
         if sha256(archive) != MIVOLO_ZIP_SHA256:
-
             raise SystemExit(f"Checksum mismatch: {archive}")
         with zipfile.ZipFile(archive) as bundle:
             bundle.extract("model_onnx/mivolo_face_only_rknn.onnx", tmp)
             bundle.extract("model_onnx/mivolo_face_only_rknn.json", tmp)
         source = Path(tmp) / "model_onnx/mivolo_face_only_rknn.onnx"
         if sha256(source) != MIVOLO_ONNX_SHA256:
-
             raise SystemExit(f"Checksum mismatch: {source}")
         source.replace(onnx)
         (Path(tmp) / "model_onnx/mivolo_face_only_rknn.json").replace(report)
@@ -74,16 +70,13 @@ def convert(model: Path, output: Path, target: str,
             std_values=std_values,
         )
         if input_name and input_size:
-
             ret = rknn.load_onnx(
                 model=str(model), inputs=[input_name],
                 input_size_list=[list(input_size)],
             )
         else:
-
             ret = rknn.load_onnx(model=str(model))
         if ret != 0:
-
             raise RuntimeError(f"load_onnx failed for {model}: {ret}")
         old_cwd = Path.cwd()
         with tempfile.TemporaryDirectory(prefix="face-rknn-build-") as tmp:
@@ -91,11 +84,9 @@ def convert(model: Path, output: Path, target: str,
             try:
                 ret = rknn.build(do_quantization=False)
                 if ret != 0:
-
                     raise RuntimeError(f"build failed for {model}: {ret}")
                 ret = rknn.export_rknn(str(output))
                 if ret != 0:
-
                     raise RuntimeError(f"export_rknn failed for {output}: {ret}")
             finally:
                 os.chdir(old_cwd)

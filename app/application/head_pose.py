@@ -31,7 +31,6 @@ class HeadPoseService(HeadPoseAnalyzer):
                 with self._lock:
                     job = self._pending.popleft() if self._pending else None
                 if job is None:
-
                     time.sleep(0.05)
                     continue
                 frame, faces = job
@@ -48,7 +47,6 @@ class HeadPoseService(HeadPoseAnalyzer):
 
     def submit(self, frame, faces: list[Face]) -> None:
         if self.analyzer is None or not faces:
-
             return
         stamp = time.time()
         payload = [{
@@ -62,25 +60,21 @@ class HeadPoseService(HeadPoseAnalyzer):
 
     def predict_frame(self, frame, faces: list[Face]) -> list[Face]:
         if self.analyzer is None:
-
             return faces
         return self.analyzer.predict_frame(frame, faces)
 
     def remember(self, faces: list[Face]) -> list[Face]:
         if self.analyzer is None:
-
             return faces
         return self.analyzer.remember(faces)
 
     def fill_from_cache(self, faces: list[Face]) -> list[Face]:
         if self.analyzer is None:
-
             return faces
         return self.analyzer.fill_from_cache(faces)
 
     def describe(self) -> dict:
         if self.analyzer is None:
-
             return {"backend": "off", "rknn_model": None,
                     "providers": [], "loaded": False}
         return self.analyzer.describe()

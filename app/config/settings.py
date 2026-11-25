@@ -23,7 +23,6 @@ def _text(name: str, default: str) -> str:
 def _number(name: str, default: int | float) -> int | float:
     raw = os.getenv(name)
     if raw is None:
-
         return default
     return type(default)(raw)
 
@@ -39,14 +38,11 @@ def _float(name: str, default: float) -> float:
 def _bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
-
         return default
     value = raw.strip().lower()
     if value in ("1", "true", "yes", "on"):
-
         return True
     if value in ("0", "false", "no", "off"):
-
         return False
     raise ValueError(f"{name} must be 0/1/true/false, got {raw!r}")
 
@@ -99,7 +95,6 @@ class Settings:
     def from_env(cls) -> "Settings":
         align = _text("AGE_GENDER_ALIGN", "arcface").lower()
         if align not in ALIGN_MODES:
-
             align = "arcface"
         return cls(
             model_name=_text("MODEL_NAME", "models/yolo11n.pt"),
