@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Camera</title>
+<style>
+@font-face {
+  font-family: UbuntuSans;
+  src: url('/ubuntu-sans.ttf') format('truetype');
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #10131a;
+  color: #eef2f7;
+  font-family: UbuntuSans, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.stage {
+  width: min(96vw, 960px);
+  background: #000;
+  border: 1px solid #2b3342;
+  border-radius: 10px;
+  overflow: hidden;
+  line-height: 0;
+}
+.stage img, .stage video { width: 100%; height: auto; display: block; }
+.row {
+  width: min(96vw, 960px);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.card {
+  flex: 1 1 300px;
+  background: #171c26;
+  border: 1px solid #2b3342;
+  border-radius: 10px;
+  padding: 12px;
+}
+.card h2 { margin: 0 0 8px; font-size: 15px; }
+#result { font-size: 13px; white-space: pre-wrap; color: #b8c4d6; }
+#status { font-size: 13px; color: #9fb0c8; }
+video { display: none; }
+</style>
+</head>
+<body>
+<h1>AI Camera — framed capture → per-second batch → labeled stream</h1>
+
+<div class="stage"><img id="out" alt="processed stream"></div>
+
+<div class="row">
+  <div class="card">
+    <h2>Per-person result (mode)</h2>
+    <div id="result">waiting…</div>
+  </div>
+  <div class="card">
+    <h2>Status</h2>
+    <div id="status">starting…</div>
+  </div>
+</div>
+
+<video id="cam" autoplay muted playsinline></video>
+
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get('token') || '';
+  const status = document.getElementById('status');
+  const resultBox = document.getElementById('result');
+  const cam = document.getElementById('cam');
+  const out = document.getElementById('out');
+
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+  out.src = `/api/output/stream${suffix}`;
+
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(`${scheme}//${location.host}/api/capture/stream${suffix}`);
+
+  socket.onopen = () => { status.textContent = 'upload stream connected'; };
+  socket.onclose = () => { status.textContent = 'upload stream closed'; };
+  socket.onerror = () => { status.textContent = 'upload stream error'; };
+
+  navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+    audio: false
+  }).then(stream => {
+    cam.srcObject = stream;
+    return cam.play();
+  }).then(() => {
+    status.textContent = 'camera live — sending frames';
+    const canvas = document.createElement('canvas');
+    canvas.width = cam.videoWidth || 640;
+    canvas.height = cam.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+
+    setInterval(() => {
+      if (cam.readyState < 2 || socket.readyState !== WebSocket.OPEN) return;
+      ctx.drawImage(cam, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (blob && socket.readyState === WebSocket.OPEN) socket.send(blob);
+      }, 'image/jpeg', 0.7);
+    }, 40);
+  }).catch(err => {
+    status.textContent = `camera error: ${err.message}`;
+  });
+
+  setInterval(async () => {
+    try {
+      const response = await fetch(`/api/result${suffix}`);
+      const data = await response.json();
+      resultBox.textContent = JSON.stringify(data.result, null, 2) + '\n' + JSON.stringify(data.stats);
+    } catch (err) {
+      resultBox.textContent = `result error: ${err.message}`;
+    }
+  }, 1000);
+})();
+</script>
+</body>
+</html>

@@ -1,36 +1,415 @@
 from __future__ import annotations
 
+import hmac
+import os
+import queue
+import threading
+import time
+from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
-from fastapi import FastAPI
+import numpy as np
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
+from PIL import Image, ImageDraw, ImageFont
 
-from .application.attribute_recognition import AttributeRecognitionService
-from .application.frame_processor import FrameProcessor
-from .application.head_pose import HeadPoseService
 from .config.settings import Settings
-from .config.settings_store import load_saved
-from.domain.aggregation.services import(AttributeAggregator, CountAggregator,)
-from .domain.age.services import AgeService
-from .domain.detection.services import HumanDetectionService
-from .domain.face.services import FaceDetectionService, FaceQualityService
-from .domain.gender.services import GenderService
-from .infrastructure.camera.opencv_camera import OpenCVCamera
-from .infrastructure.rendering.opencv_renderer import OpenCVFrameRenderer
+from .domain.geometry import iou, sharpness
 from .infrastructure.rknn.genderage_estimator import RknnGenderAgeEstimator
 from .infrastructure.rknn.retinaface_detector import RknnFaceDetector
-from .infrastructure.rknn.runtime import hw_summary
-from .infrastructure.rknn.whenet_estimator import RknnHeadPoseEstimator
 from .infrastructure.rknn.yolo_detector import RknnPersonDetector
-from .interfaces.controllers import api_controller, stream_controller
-from .interfaces.controllers.stream_controller import StreamController
-from .interfaces.flip_state import FlipState
-from .interfaces.presenters.stats_presenter import StatsPresenter
+from .interfaces.auth import require_token
+
+WEB_DIR     = Path(__file__).resolve().parent / "interfaces" / "web"
+INDEX_PATH  = WEB_DIR / "index.html"
+FONT_PATH   = WEB_DIR / "UbuntuSans.ttf"
+_FONT_CACHE = {}
 
 
-def _build_runtime() -> SimpleNamespace:
-    load_saved()
+def _token_ok(token: str | None) -> bool:
+    expected = os.getenv("API_TOKEN")
+
+    if not expected:
+
+        return True
+
+    return bool(token) and hmac.compare_digest(token, expected)
+
+
+def _font(size: int) -> ImageFont.FreeTypeFont:
+
+    if size not in _FONT_CACHE:
+        _FONT_CACHE[size] = ImageFont.truetype(str(FONT_PATH), size)
+
+    return _FONT_CACHE[size]
+
+
+def _mode(values: list, most_recent_on_tie: bool = True):
+    if not values:
+
+        return None
+    counts = Counter(values)
+    top    = max(counts.values())
+    tied   = [value for value, count in counts.items() if count == top]
+
+    if len(tied) == 1:
+
+        return tied[0]
+
+    if not most_recent_on_tie:
+
+        return tied[0]
+    last_seen = {}
+
+    for index, value in enumerate(values):
+        last_seen[value] = index
+
+    return max(tied, key=lambda value: last_seen[value])
+
+
+class _Tracker:
+    def __init__(self):
+        self._next  = 1
+        self._boxes = {}
+
+    def match(self, boxes: list[list[int]]) -> list[tuple[int, list[int]]]:
+        used    = set()
+        matched = []
+
+        for box in boxes:
+            best, best_iou = None, 0.0
+
+            for person_id, previous in self._boxes.items():
+
+                if person_id in used:
+
+                    continue
+                overlap = iou(box, previous)
+
+                if overlap > best_iou:
+                    best, best_iou = person_id, overlap
+
+            if best is not None and best_iou >= 0.3:
+                person_id = best
+                used.add(person_id)
+                self._boxes[person_id] = box
+            else:
+                person_id = self._next
+                self._next += 1
+                self._boxes[person_id] = box
+                used.add(person_id)
+            matched.append((person_id, box))
+
+        self._boxes = {key: self._boxes[key] for key in used if key in self._boxes}
+
+        return matched
+
+
+class Pipeline:
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.person   = RknnPersonDetector(settings)
+        self.face     = RknnFaceDetector(settings) if settings.face_enable else None
+        face_loaded   = self.face is not None and self.face.describe().get("loaded", False)
+        self.age      = RknnGenderAgeEstimator(settings) if face_loaded else None
+        self.tracker  = _Tracker()
+        self.incoming = queue.Queue()
+        self.stop     = threading.Event()
+        self._lock    = threading.Lock()
+        self.latest_batch = []
+        self.result       = {}
+        self.stats        = {"batches": 0, "frames_in": 0, "frames_out": 0}
+        self._thread      = None
+
+    def start(self) -> None:
+
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._work, daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self.stop.set()
+
+    def push(self, frame: np.ndarray) -> None:
+        self.incoming.put((time.time(), frame))
+        self.stats["frames_in"] += 1
+
+    def describe(self) -> dict:
+        return {
+            "person": self.person.describe(),
+            "face": self.face.describe() if self.face is not None else None,
+            "age_gender": self.age.describe() if self.age is not None else None,
+        }
+
+    def snapshot(self) -> dict:
+
+        with self._lock:
+            return {
+                "result": {str(key): value for key, value in self.result.items()},
+                "stats": dict(self.stats),
+            }
+
+    def frames(self):
+        interval = 1.0 / max(1.0, self.settings.stream_fps)
+        index    = 0
+
+        while True:
+            started = time.time()
+
+            with self._lock:
+                batch = list(self.latest_batch)
+
+            if not batch:
+                time.sleep(0.05)
+
+                continue
+            frame = batch[index % len(batch)]
+            index += 1
+            ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
+
+            if ok:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
+            time.sleep(max(0.0, interval - (time.time() - started)))
+
+    def _work(self) -> None:
+        batch   = []
+        current = None
+        deadline = 0.0
+
+        while not self.stop.is_set():
+
+            try:
+                stamp, frame = self.incoming.get(timeout=0.05)
+            except queue.Empty:
+
+                if batch and time.time() >= deadline:
+                    self._flush(batch)
+                    batch, current, deadline = [], None, 0.0
+
+                continue
+            second = int(stamp)
+
+            if current is None:
+                current  = second
+                deadline = second + 1.0
+
+            if second != current or time.time() >= deadline:
+
+                if batch:
+                    self._flush(batch)
+                batch    = []
+                current  = second
+                deadline = second + 1.0
+            batch.append((stamp, frame))
+
+            if time.time() >= deadline:
+                self._flush(batch)
+                batch, current, deadline = [], None, 0.0
+
+        if batch:
+            self._flush(batch)
+
+    def _flush(self, batch: list) -> None:
+
+        try:
+            annotated, result = self._process(batch)
+        except Exception as exc:
+            print(f"[batch] {exc}")
+
+            return
+
+        with self._lock:
+            self.latest_batch    = annotated
+            self.result          = result
+            self.stats["batches"] += 1
+            self.stats["frames_out"] += len(annotated)
+
+    def _process(self, batch: list) -> tuple[list, dict]:
+        records = []
+        samples = defaultdict(list)
+
+        for _, frame in batch:
+            view    = frame.copy()
+            people  = self._people(view)
+            faces   = self._faces(view, people)
+
+            for face in faces:
+                person_id = face.get("person_id")
+
+                if person_id is None:
+
+                    continue
+                samples[person_id].append((
+                    face.get("age", 0),
+                    face.get("gender", "Unknown"),
+                    bool(face.get("looking")),
+                    float(face.get("gconf", 0.0)),
+                ))
+            records.append((view, people, faces))
+
+        result = {}
+
+        for person_id, values in samples.items():
+            ages    = [value[0] for value in values]
+            genders = [value[1] for value in values]
+            looks   = [value[2] for value in values]
+            result[person_id] = {
+                "age": _mode(ages),
+                "gender": _mode(genders),
+                "looking": _mode(looks),
+                "samples": len(values),
+                "confidence": round(sum(value[3] for value in values) / max(len(values), 1), 3),
+            }
+
+        annotated = []
+
+        for view, people, faces in records:
+            self._draw(view, people, faces, result)
+            annotated.append(view)
+
+        return annotated, result
+
+    def _people(self, frame: np.ndarray) -> list[dict]:
+        boxes = []
+
+        for detection in self.person.detect(frame):
+
+            if detection.get("kind") != "human":
+
+                continue
+            box = [int(value) for value in detection["box"]]
+
+            if box[2] - box[0] < 1 or box[3] - box[1] < 1:
+
+                continue
+            boxes.append((box, float(detection.get("conf", 0.0))))
+
+        matched = self.tracker.match([box for box, _ in boxes])
+        people  = []
+
+        for (box, confidence), (person_id, _) in zip(boxes, matched):
+            people.append({"box": box, "conf": confidence, "person_id": person_id})
+
+        return people
+
+    def _faces(self, frame: np.ndarray, people: list[dict]) -> list[dict]:
+
+        if self.face is None:
+
+            return []
+        height, width = frame.shape[:2]
+        found         = []
+
+        for person in people:
+            x1, y1, x2, y2 = person["box"]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+
+            if x2 - x1 < 2 or y2 - y1 < 2:
+
+                continue
+
+            try:
+                detected = self.face.detect(frame[y1:y2, x1:x2])
+            except Exception as exc:
+                print(f"[face] {exc}")
+
+                continue
+
+            for face in detected:
+                fx1, fy1, fx2, fy2 = (int(value) for value in face["box"])
+                face["box"] = [fx1 + x1, fy1 + y1, fx2 + x1, fy2 + y1]
+                landmarks   = face.get("landmarks")
+
+                if landmarks:
+                    face["landmarks"] = [[int(px) + x1, int(py) + y1] for px, py in landmarks]
+                face["person_id"] = person["person_id"]
+                face["human_box"] = person["box"]
+                found.append(face)
+
+        unique = []
+
+        for face in found:
+
+            if any(iou(face["box"], other["box"]) > 0.7 for other in unique):
+
+                continue
+            unique.append(face)
+
+        for face in unique:
+            self._attributes(frame, face)
+
+        return unique
+
+    def _attributes(self, frame: np.ndarray, face: dict) -> None:
+        face.setdefault("gender", "Unknown")
+        face.setdefault("age", 0)
+        face.setdefault("gconf", 0.0)
+        x1, y1, x2, y2 = face["box"]
+
+        if min(x2 - x1, y2 - y1) < self.settings.face_min_size:
+
+            return
+        value             = sharpness(frame, face["box"])
+        face["sharpness"] = round(value, 1)
+
+        if self.settings.face_blur > 0 and value < self.settings.face_blur:
+            face["blurry"] = True
+
+            return
+        face["blurry"] = False
+
+        if self.age is None:
+
+            return
+        sample = self.age.estimate(frame, face, self.settings.age_align)
+
+        if sample is None:
+
+            return
+        raw_age         = float(sample.raw_age)
+        face["age"]     = int(round(raw_age))
+        face["raw_age"] = round(raw_age, 1)
+        logits          = np.asarray(sample.gender_logits, dtype=np.float32)
+        logits          = logits - float(np.max(logits))
+        probs           = np.exp(logits)
+        probs          /= max(float(np.sum(probs)), 1e-12)
+        chosen          = int(np.argmax(probs))
+        face["gender"]  = "Male" if chosen == 1 else "Female"
+        face["gconf"]   = round(float(probs[chosen]), 3)
+        face["align"]   = sample.align
+
+    def _draw(self, frame: np.ndarray, people: list[dict], faces: list[dict], result: dict) -> None:
+        image = Image.fromarray(frame)
+        draw  = ImageDraw.Draw(image)
+        font  = _font(18)
+
+        for face in faces:
+            x1, y1, x2, y2 = face["box"]
+            draw.rectangle((x1, y1, x2, y2), outline=(255, 200, 0), width=1)
+
+        for person in people:
+            person_id         = person["person_id"]
+            x1, y1, x2, y2    = person["box"]
+            aggregated        = result.get(person_id, {})
+            gender            = aggregated.get("gender", "Unknown")
+            age               = aggregated.get("age", 0)
+            text              = f"#{person_id} {gender} {age}y {person['conf']:.2f}"
+            left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+            width, height     = right - left, bottom - top
+            text_y            = max(0, y1 - height - 6)
+            draw.rectangle((x1, text_y, x1 + width + 6, text_y + height + 4), fill=(0, 0, 0))
+            draw.text((x1 + 3, text_y + 2), text, font=font, fill=(255, 255, 255))
+            draw.rectangle((x1, y1, x2, y2), outline=(0, 255, 0), width=2)
+
+        frame[:] = np.asarray(image)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     settings = Settings.from_env()
 
     try:
@@ -38,54 +417,78 @@ def _build_runtime() -> SimpleNamespace:
     except Exception:
         pass
 
-
-    try:
-        hardware = hw_summary()
-        print(f"[hw] {hardware}")
-    except Exception as exc:
-        hardware = {}
-        print(f"[hw] accel check skip: {exc}")
-
-
-    camera               = OpenCVCamera(settings.camera_source, settings.frame_width, settings.frame_height)
-    person_detector      = RknnPersonDetector(settings)
-    face_detector        = RknnFaceDetector(settings) if settings.face_enable else None
-    face_loaded          = (face_detector is not None and face_detector.describe().get("loaded", False))
-    estimator            = (RknnGenderAgeEstimator(settings) if face_loaded else None)
-    age_service          = AgeService()
-    gender_service       = GenderService()
-    quality              = FaceQualityService(settings.face_blur)
-    attribute_aggregator = AttributeAggregator(interval_sec=settings.interval)
-    attributes           = (AttributeRecognitionService(estimator, quality, age_service, gender_service, attribute_aggregator, settings.face_min_size, settings.age_align) if estimator is not None else None)
-    headpose_adapter     = (RknnHeadPoseEstimator(settings) if settings.headpose_enable and face_loaded else None)
-    headpose             = (HeadPoseService(headpose_adapter, True) if headpose_adapter is not None else None)
-    face_detection       = (FaceDetectionService(face_detector, settings.face_every, attributes, headpose) if face_detector is not None and attributes is not None else None)
-    human_detection      = HumanDetectionService(person_detector, settings.conf, settings.person_min_h, settings.person_require_face, settings.detect_every, settings.det_stale_sec)
-    count_aggregator     = CountAggregator(settings.interval)
-    renderer             = OpenCVFrameRenderer()
-    processor            = FrameProcessor(human_detection, face_detection, attributes, headpose, count_aggregator, renderer)
-    flip                 = FlipState(settings.flip_h, settings.flip_v)
-    presenter            = StatsPresenter(settings, camera, processor, flip, hardware)
-    stream               = StreamController(camera, processor, settings, flip)
-
-    return SimpleNamespace(settings = settings, camera = camera, processor = processor, presenter = presenter, stream = stream, flip = flip)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    runtime           = _build_runtime()
-    app.state.runtime = runtime
-    runtime.camera.start()
-    runtime.stream.start()
+    pipeline = Pipeline(settings)
+    pipeline.start()
+    app.state.runtime = SimpleNamespace(settings=settings, pipeline=pipeline)
 
     try:
         yield
     finally:
-        runtime.camera.stop()
+        pipeline.stop()
 
 
+app = FastAPI(title="AI Camera - streaming frames + per-person mode", lifespan=lifespan)
 
-app = FastAPI(title = "AI Camera - Human + Face + Gender (RK3576)", lifespan = lifespan)
-app.include_router(stream_controller.public_router)
-app.include_router(stream_controller.router)
-app.include_router(api_controller.router)
+
+@app.get("/ubuntu-sans.ttf")
+def ubuntu_sans():
+
+    return FileResponse(FONT_PATH, media_type="font/ttf")
+
+
+@app.get("/", dependencies=[Depends(require_token)])
+def index():
+
+    return FileResponse(INDEX_PATH, media_type="text/html")
+
+
+@app.websocket("/api/capture/stream")
+async def capture_stream(websocket: WebSocket):
+
+    if not _token_ok(websocket.query_params.get("token")):
+        await websocket.close(code=1008)
+
+        return
+    await websocket.accept()
+    pipeline = websocket.app.state.runtime.pipeline
+
+    try:
+
+        while True:
+            data  = await websocket.receive_bytes()
+            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+            if frame is not None:
+                pipeline.push(frame)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+
+
+@app.get("/api/output/stream")
+def output_stream(request: Request, _=Depends(require_token)):
+
+    return StreamingResponse(
+        request.app.state.runtime.pipeline.frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/result", dependencies=[Depends(require_token)])
+def result(request: Request):
+
+    return request.app.state.runtime.pipeline.snapshot()
+
+
+@app.get("/api/health", dependencies=[Depends(require_token)])
+def health(request: Request):
+    pipeline = request.app.state.runtime.pipeline
+    details  = pipeline.describe()
+    age      = details.get("age_gender") or {}
+
+    return {
+        "age_gender_backend": age.get("backend"),
+        "age_gender_model_kind": age.get("model_kind"),
+        "age_source": age.get("age_source"),
+        "age_loaded": bool(age.get("age_loaded")),
+        "models": details,
+    }
