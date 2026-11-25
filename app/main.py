@@ -26,8 +26,9 @@ from .interfaces.auth import require_token
 WEB_DIR     = Path(__file__).resolve().parent / "interfaces" / "web"
 INDEX_PATH  = WEB_DIR / "index.html"
 FONT_PATH   = WEB_DIR / "UbuntuSans.ttf"
-_FONT_CACHE   = {}
-_PLACEHOLDER  = None
+_FONT_CACHE          = {}
+_PLACEHOLDER         = None
+_SAMPLES_PER_PERSON  = 3
 
 
 def _placeholder() -> np.ndarray:
@@ -133,6 +134,7 @@ class Pipeline:
         self.stop     = threading.Event()
         self._lock    = threading.Lock()
         self.latest_batch = []
+        self.live         = None
         self.result       = {}
         self.last_error   = None
         self.stats        = {"batches": 0, "frames_in": 0, "frames_out": 0}
@@ -169,19 +171,12 @@ class Pipeline:
 
     def frames(self):
         interval = 1.0 / max(1.0, self.settings.stream_fps)
-        index    = 0
 
         while True:
             started = time.time()
 
             with self._lock:
-                batch = list(self.latest_batch)
-
-            if not batch:
-                frame = _placeholder()
-            else:
-                frame = batch[index % len(batch)]
-                index += 1
+                frame = self.live.copy() if self.live is not None else _placeholder()
             ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
 
             if ok:
@@ -241,6 +236,7 @@ class Pipeline:
 
         with self._lock:
             self.latest_batch    = annotated
+            self.live            = annotated[-1].copy() if annotated else None
             self.result          = result
             self.last_error      = None
             self.stats["batches"] += 1
@@ -248,41 +244,75 @@ class Pipeline:
         print(f"[batch] in={len(batch)} people={len(result)} ms={elapsed}")
 
     def _process(self, batch: list) -> tuple[list, dict]:
-        records = []
-        samples = defaultdict(list)
+        with self._lock:
+            previous = dict(self.result)
+
+        records   = []
+        by_person = defaultdict(list)
 
         for _, frame in batch:
-            view    = frame.copy()
-            people  = self._people(view)
-            faces   = self._faces(view, people)
+            view   = frame.copy()
+            people = self._people(view)
+            faces  = self._faces(view, people)
 
             for face in faces:
                 person_id = face.get("person_id")
 
-                if person_id is None:
+                if person_id is not None:
+                    by_person[person_id].append((face, view))
+            self._draw(view, people, faces, previous)
 
-                    continue
-                samples[person_id].append((
+            with self._lock:
+                self.live = view.copy()
+            records.append((view, people, faces))
+
+        result = {}
+
+        for person_id, entries in by_person.items():
+            eligible = [entry for entry in entries if entry[0].get("eligible")]
+            eligible.sort(
+                key=lambda entry: (entry[0].get("sharpness", 0.0), entry[0].get("area", 0)),
+                reverse=True,
+            )
+            chosen = eligible[:_SAMPLES_PER_PERSON]
+            values = []
+
+            for face, view in chosen:
+                self._attributes(view, face)
+                values.append((
                     face.get("age", 0),
                     face.get("gender", "Unknown"),
                     bool(face.get("looking")),
                     float(face.get("gconf", 0.0)),
                 ))
-            records.append((view, people, faces))
 
-        result = {}
+            if values:
+                result[person_id] = {
+                    "age": _mode([value[0] for value in values]),
+                    "gender": _mode([value[1] for value in values]),
+                    "looking": _mode([value[2] for value in values]),
+                    "samples": len(entries),
+                    "confidence": round(sum(value[3] for value in values) / len(values), 3),
+                    "model_runs": len(values),
+                }
+            else:
+                result[person_id] = {
+                    "age": 0,
+                    "gender": "Unknown",
+                    "looking": False,
+                    "samples": len(entries),
+                    "confidence": 0.0,
+                    "model_runs": 0,
+                }
 
-        for person_id, values in samples.items():
-            ages    = [value[0] for value in values]
-            genders = [value[1] for value in values]
-            looks   = [value[2] for value in values]
-            result[person_id] = {
-                "age": _mode(ages),
-                "gender": _mode(genders),
-                "looking": _mode(looks),
-                "samples": len(values),
-                "confidence": round(sum(value[3] for value in values) / max(len(values), 1), 3),
-            }
+            aggregated = result[person_id]
+
+            for face, _ in entries:
+                face["age"]         = aggregated["age"]
+                face["gender"]      = aggregated["gender"]
+                face["gconf"]       = aggregated["confidence"]
+                face["looking"]     = aggregated["looking"]
+                face["aggregated"]  = True
 
         annotated = []
 
@@ -360,27 +390,32 @@ class Pipeline:
             unique.append(face)
 
         for face in unique:
-            self._attributes(frame, face)
+            self._prepare_frame_face(frame, face)
 
         return unique
 
-    def _attributes(self, frame: np.ndarray, face: dict) -> None:
+    def _prepare_frame_face(self, frame: np.ndarray, face: dict) -> None:
         face.setdefault("gender", "Unknown")
         face.setdefault("age", 0)
         face.setdefault("gconf", 0.0)
-        x1, y1, x2, y2 = face["box"]
+        face["eligible"] = False
+        face["blurry"]   = False
+        x1, y1, x2, y2   = face["box"]
 
         if min(x2 - x1, y2 - y1) < self.settings.face_min_size:
 
             return
         value             = sharpness(frame, face["box"])
         face["sharpness"] = round(value, 1)
+        face["area"]      = (x2 - x1) * (y2 - y1)
 
         if self.settings.face_blur > 0 and value < self.settings.face_blur:
             face["blurry"] = True
 
             return
-        face["blurry"] = False
+        face["eligible"] = self.age is not None
+
+    def _attributes(self, frame: np.ndarray, face: dict) -> None:
 
         if self.age is None:
 
