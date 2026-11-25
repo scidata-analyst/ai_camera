@@ -37,6 +37,7 @@ class OpenCVCamera(FrameSource):
         except Exception:
             pass
 
+
         self.cap = cv2.VideoCapture(self.source)
 
         if self.cap.isOpened():
@@ -45,16 +46,19 @@ class OpenCVCamera(FrameSource):
             except Exception:
                 pass
 
+
             try:
                 self.cap.set(cv2.CAP_PROP_FOURCC,
                              cv2.VideoWriter_fourcc(*"MJPG"))
             except Exception:
                 pass
 
+
             try:
                 self.cap.set(cv2.CAP_PROP_FPS, 30)
             except Exception:
                 pass
+
 
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)

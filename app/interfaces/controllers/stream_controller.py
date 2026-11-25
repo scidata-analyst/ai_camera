@@ -70,6 +70,7 @@ class StreamController:
                 print(f"[infer] {exc}")
                 time.sleep(0.2)
 
+
     def frames(self):
         interval = 1.0 / max(1.0, self.settings.stream_fps)
         while True:

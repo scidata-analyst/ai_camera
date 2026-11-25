@@ -47,10 +47,12 @@ class HeadPoseService(HeadPoseAnalyzer):
                     self.analyzer.remember(faces)
                 except Exception as exc:
                     print(f"[headpose-bg] {exc}")
+
                 self.last_ms = round((time.perf_counter() - started) * 1000, 1)
             except Exception as exc:
                 print(f"[bg] {exc}")
                 time.sleep(0.2)
+
 
     def submit(self, frame, faces: list[Face]) -> None:
 

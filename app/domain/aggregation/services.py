@@ -21,6 +21,7 @@ def _safe_mode(values):
         return int(collections.Counter(values).most_common(1)[0][0])
 
 
+
 def _majority(values):
 
     if not values:

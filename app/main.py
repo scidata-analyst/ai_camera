@@ -38,12 +38,14 @@ def _build_runtime() -> SimpleNamespace:
     except Exception:
         pass
 
+
     try:
         hardware = hw_summary()
         print(f"[hw] {hardware}")
     except Exception as exc:
         hardware = {}
         print(f"[hw] accel check skip: {exc}")
+
 
     camera               = OpenCVCamera(settings.camera_source, settings.frame_width, settings.frame_height)
     person_detector      = RknnPersonDetector(settings)
@@ -80,6 +82,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         runtime.camera.stop()
+
 
 
 app = FastAPI(title = "AI Camera - Human + Face + Gender (RK3576)", lifespan = lifespan)

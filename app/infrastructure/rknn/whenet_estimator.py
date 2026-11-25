@@ -59,6 +59,7 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             except ImportError:
                 outputs = self.rknn.inference(inputs=[blob])
 
+
             if not outputs:
                 raise RuntimeError("RKNN returned no outputs")
             rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
@@ -163,6 +164,7 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 print(f"[headpose] preprocess fail: {exc}")
                 face.update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "looking": False})
 
+
         if blobs:
 
             try:
@@ -178,5 +180,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
 
                 for index in indexes:
                     faces[index].update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "looking": False})
+
 
         return faces

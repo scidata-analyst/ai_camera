@@ -92,9 +92,11 @@ def convert(model: Path, output: Path, target: str, mean_values, std_values, inp
                     raise RuntimeError(f"export_rknn failed for {output}: {ret}")
             finally:
                 os.chdir(old_cwd)
+
         print(f"[export] saved {output} ({output.stat().st_size / 1e6:.2f} MB)")
     finally:
         rknn.release()
+
 
 
 def main() -> None:

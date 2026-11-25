@@ -52,6 +52,7 @@ class RknnFaceDetector(FaceDetector):
             except ImportError:
                 outputs = self.rknn.inference(inputs=[blob])
 
+
             if not outputs:
                 raise RuntimeError("RKNN returned no outputs")
 

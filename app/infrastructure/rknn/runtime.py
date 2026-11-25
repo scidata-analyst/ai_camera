@@ -55,6 +55,7 @@ def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
     except Exception:
         pass
 
+
     return "", ()
 
 
@@ -126,8 +127,10 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
                 return rknn.inference(**retry)
             except Exception:
                 pass
+
         raise RuntimeError(
             f"RKNN inference failed ({exc}); tried {layout} and {other}") from exc
+
 
 
 def rknn_input_summary(rknn) -> dict:
@@ -144,6 +147,7 @@ def rknn_input_summary(rknn) -> dict:
     except Exception:
 
         return {}
+
 
 
 def rknn_load(path: str, label: str = "model") -> tuple:
@@ -167,6 +171,7 @@ def rknn_load(path: str, label: str = "model") -> tuple:
             kwargs["core_mask"] = int(core)
         except ValueError:
             pass
+
     ret = rknn.init_runtime(**kwargs) if kwargs else rknn.init_runtime()
 
     if ret != 0:

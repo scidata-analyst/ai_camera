@@ -78,6 +78,7 @@ def _apply_live(runtime, settings: Settings) -> None:
         pass
 
 
+
 @router.get("/api/health")
 def health(request: Request):
 
@@ -110,6 +111,7 @@ def post_settings(request: Request, payload: dict[str, object]):
         describe_result = update(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
     settings = Settings.from_env()
     _apply_live(request.app.state.runtime, settings)
 

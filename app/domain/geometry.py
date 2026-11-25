@@ -87,6 +87,7 @@ def landmarks(face: dict) -> np.ndarray | None:
 
         return None
 
+
     return points if np.all(np.isfinite(points)) else None
 
 

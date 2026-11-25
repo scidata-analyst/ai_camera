@@ -47,9 +47,11 @@ def main() -> None:
                     raise RuntimeError(f"export_rknn failed: {ret}")
             finally:
                 os.chdir(old_cwd)
+
         print(f"[export] RKNN saved: {out} ({out.stat().st_size / 1e6:.1f} MB)")
     finally:
         rknn.release()
+
 
 
 if __name__ == "__main__":

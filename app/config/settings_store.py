@@ -68,6 +68,7 @@ def load_saved() -> None:
 
         return
 
+
     if not isinstance(data, dict):
 
         return
@@ -80,6 +81,7 @@ def load_saved() -> None:
                 os.environ[key] = _coerce(key, value)
             except (ValueError, TypeError):
                 continue
+
 
 
 def update(values: dict) -> list[dict]:
@@ -100,6 +102,7 @@ def update(values: dict) -> list[dict]:
     except OSError:
         pass
 
+
     return describe()
 
 
@@ -112,5 +115,6 @@ def reset() -> list[dict]:
         SETTINGS_FILE.unlink()
     except OSError:
         pass
+
 
     return describe()

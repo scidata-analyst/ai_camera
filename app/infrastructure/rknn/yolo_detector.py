@@ -35,6 +35,7 @@ class RknnPersonDetector(PersonDetector):
                   f"exists={os.path.exists(self.rknn_path)}")
         except Exception:
             pass
+
         self.rknn, _ = rknn_load(self.rknn_path, "yolo")
         print(f"[yolo] NPU input: {rknn_input_summary(self.rknn)}")
         print(f"[yolo] NPU backend active: {self.rknn_path}")
@@ -66,6 +67,7 @@ class RknnPersonDetector(PersonDetector):
                 self._warned = True
 
             return []
+
 
     def _detect_boxes(self, frame: np.ndarray) -> list[Detection]:
 
@@ -137,6 +139,7 @@ class RknnPersonDetector(PersonDetector):
             picked = [int(value) for value in np.asarray(picked).reshape(-1)]
         except Exception:
             picked = list(range(len(nms_boxes)))
+
         picked = sorted(picked, key=lambda index: -float(confs[index]))
 
         return[{"kind": "human", "class": PERSON_CLASS_NAME, "conf": round(float(confs[index]), 3), "box": [int(corners[index][0]), int(corners[index][1]), int(corners[index][2]), int(corners[index][3])],} for index in picked]

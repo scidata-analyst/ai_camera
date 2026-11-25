@@ -146,6 +146,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         finally:
             self.age_last_ms = round((time.perf_counter() - started) * 1000, 1)
 
+
     def _output_names(self) -> list[str]:
 
         try:
@@ -153,6 +154,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         except Exception:
 
             return []
+
 
         return [str(detail.get("name", "")).lower() for detail in details]
 
