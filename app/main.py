@@ -71,6 +71,30 @@ def _mode(values: list, most_recent_on_tie: bool = True):
     return max(tied, key=lambda value: last_seen[value])
 
 
+def _follow_person(faces: list[dict], people: list[dict], anchors: list[dict]) -> None:
+    current  = {person["person_id"]: person["box"] for person in people}
+    previous = {person["person_id"]: person["box"] for person in anchors}
+
+    for face in faces:
+        person_id = face.get("person_id")
+
+        if person_id not in current or person_id not in previous:
+
+            continue
+        dx = int(current[person_id][0] - previous[person_id][0])
+        dy = int(current[person_id][1] - previous[person_id][1])
+
+        if dx == 0 and dy == 0:
+
+            continue
+        x1, y1, x2, y2 = face["box"]
+        face["box"] = [x1 + dx, y1 + dy, x2 + dx, y2 + dy]
+        points = face.get("landmarks")
+
+        if points:
+            face["landmarks"] = [[int(px) + dx, int(py) + dy] for px, py in points]
+
+
 class _Tracker:
     def __init__(self):
         self._next  = 1
@@ -127,6 +151,7 @@ class Pipeline:
         self.preview      = None
         self.overlay_people = []
         self.overlay_faces  = []
+        self.anchor_people  = []
         self.result       = {}
         self.last_error   = None
         self.timings      = {"yolo": 0.0, "face": 0.0, "age": 0.0}
@@ -241,16 +266,29 @@ class Pipeline:
             with self._lock:
                 has_frame = self.preview is not None
                 frame = self.preview.copy() if has_frame else _placeholder()
-                people = [dict(person) for person in self.overlay_people]
-                faces  = [dict(face) for face in self.overlay_faces]
-                result = dict(self.result)
+                people  = [dict(person) for person in self.overlay_people]
+                faces   = [dict(face) for face in self.overlay_faces]
+                anchors = [dict(person) for person in self.anchor_people]
+                result  = dict(self.result)
             if has_frame:
+                _follow_person(faces, people, anchors)
                 self._draw(frame, people, faces, result)
             ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
 
             if ok:
                 yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
             time.sleep(max(0.0, interval - (time.time() - started)))
+
+    def _live_people(self, frame: np.ndarray) -> list[dict]:
+        started = time.perf_counter()
+        people  = self._people(frame)
+        elapsed = time.perf_counter() - started
+
+        with self._lock:
+            self.timings["yolo"] += elapsed
+            self.overlay_people = [dict(person) for person in people]
+
+        return people
 
     def _work(self) -> None:
         batch   = []
@@ -281,7 +319,8 @@ class Pipeline:
                 batch    = []
                 current  = second
                 deadline = second + 1.0
-            batch.append((stamp, frame))
+            people = self._live_people(frame)
+            batch.append((stamp, frame, people))
 
             if time.time() >= deadline and self.incoming.qsize() == 0:
                 self._flush(batch)
@@ -291,8 +330,6 @@ class Pipeline:
             self._flush(batch)
 
     def _flush(self, batch: list) -> None:
-        started = time.perf_counter()
-
         try:
             result = self._process(batch)
         except Exception as exc:
@@ -301,43 +338,36 @@ class Pipeline:
 
             return
 
-        elapsed = round((time.perf_counter() - started) * 1000, 1)
-
         with self._lock:
             self.result          = result
             self.last_error      = None
             self.stats["batches"] += 1
             self.stats["frames_out"] += len(batch)
+            timings = dict(self.timings)
+            self.timings = {"yolo": 0.0, "face": 0.0, "age": 0.0}
         faces    = sum(int(value.get("samples", 0)) for value in result.values())
-        model_ms = sum(value * 1000 for value in self.timings.values())
-        other_ms = max(0.0, elapsed - model_ms)
+        model_ms = sum(value * 1000 for value in timings.values())
         print(
-            f"[batch] in={len(batch)} top={self.top_frame} faces={faces} people={len(result)} ms={elapsed} "
-            f"yolo={self.timings['yolo'] * 1000:.0f} "
-            f"face={self.timings['face'] * 1000:.0f} "
-            f"age={self.timings['age'] * 1000:.0f} "
-            f"other={other_ms:.0f}"
+            f"[batch] in={len(batch)} top={self.top_frame} faces={faces} people={len(result)} ms={model_ms:.0f} "
+            f"yolo={timings['yolo'] * 1000:.0f} "
+            f"face={timings['face'] * 1000:.0f} "
+            f"age={timings['age'] * 1000:.0f}"
         )
 
     def _process(self, batch: list) -> dict:
         with self._lock:
             previous = dict(self.result)
 
-        timings     = {"yolo": 0.0, "face": 0.0, "age": 0.0}
         by_person   = defaultdict(list)
         best_index  = None
         best_score  = (-1.0, -1.0)
         best_view   = None
         best_people = []
         faces       = []
+        face_time   = 0.0
+        age_time    = 0.0
 
-        for index, (_, frame) in enumerate(batch):
-            started = time.perf_counter()
-            people  = self._people(frame)
-            timings["yolo"] += time.perf_counter() - started
-
-            with self._lock:
-                self.overlay_people = [dict(person) for person in people]
+        for index, (_, frame, people) in enumerate(batch):
 
             if not people:
 
@@ -357,7 +387,7 @@ class Pipeline:
         if best_index is not None:
             started = time.perf_counter()
             faces = self._faces(best_view, best_people)
-            timings["face"] += time.perf_counter() - started
+            face_time = time.perf_counter() - started
 
             for face in faces:
                 person_id = face.get("person_id")
@@ -373,7 +403,7 @@ class Pipeline:
             for face, view in entries:
                 started = time.perf_counter()
                 ok = self._attributes(view, face)
-                timings["age"] += time.perf_counter() - started
+                age_time += time.perf_counter() - started
 
                 if not ok:
 
@@ -416,7 +446,9 @@ class Pipeline:
 
         with self._lock:
             self.overlay_faces = [dict(face) for face in faces]
-        self.timings = timings
+            self.anchor_people = [dict(person) for person in best_people]
+            self.timings["face"] += face_time
+            self.timings["age"]  += age_time
 
         return result
 
