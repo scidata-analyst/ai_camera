@@ -10,6 +10,7 @@ class FlipState:
         self.v = bool(vertical)
 
     def as_dict(self) -> dict:
+
         return {"h": self.h, "v": self.v}
 
     def set(self, h: int | None = None, v: int | None = None) -> dict:
@@ -19,6 +20,7 @@ class FlipState:
 
         if v is not None:
             self.v = bool(int(v))
+
         return self.as_dict()
 
     def toggle(self, axis: str = "h") -> dict:
@@ -30,16 +32,21 @@ class FlipState:
         elif axis in ("both", "180"):
             self.h = not self.h
             self.v = not self.v
+
         return self.as_dict()
 
     def apply(self, frame: np.ndarray) -> np.ndarray:
 
         if self.h and self.v:
+
             return cv2.flip(frame, -1)
 
         if self.h:
+
             return cv2.flip(frame, 1)
 
         if self.v:
+
             return cv2.flip(frame, 0)
+
         return frame

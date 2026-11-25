@@ -16,6 +16,7 @@ def export_onnx(pt: str, imgsz: int, workdir: str) -> str:
 
         if os.path.exists(p):
             os.remove(p)
+
     return dst
 
 
@@ -44,6 +45,7 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int, target: str = "rk3576"
     size_mb = os.path.getsize(out_path) / 1e6
     print(f"[export] OK: {out_path} ({size_mb:.1f}MB)")
     print("[export] board e test: RKNN_MODEL=" + out_path + " YOLO_BACKEND=rknn docker compose up --build")
+
     return out_path
 
 

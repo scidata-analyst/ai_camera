@@ -63,6 +63,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         self.last_ms = 0.0
 
     def describe(self) -> dict:
+
         return {
             "backend": "rknn" if self.rknn is not None else "off",
             "onnx_model": self.onnx_path,
@@ -94,20 +95,24 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 aligned = canvas
 
             rgb = aligned[:, :, ::-1]
+
             return np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.uint8)
 
         if self.fairface:
             rgb = aligned[:, :, ::-1].astype(np.float32) / 255.0
             rgb = (rgb - self._mean) / self._std
+
             return np.ascontiguousarray(rgb.transpose(2, 0, 1)[np.newaxis, ...], dtype=np.float32)
 
         blob = cv2.dnn.blobFromImage(aligned, scalefactor=1.0, size=(self.input_size, self.input_size), mean=(0, 0, 0), swapRB=True)
+
         return np.ascontiguousarray(np.transpose(blob, (0, 2, 3, 1)), dtype=np.float32)
 
     def _age_blob(self, aligned: np.ndarray) -> np.ndarray:
         chip = cv2.resize(aligned, (AGE_ONLY_INPUT_SIZE, AGE_ONLY_INPUT_SIZE), interpolation=cv2.INTER_AREA)
         rgb  = chip[:, :, ::-1].astype(np.float32)
         rgb  = (rgb - self._age_mean) / DLIB_AGE_SCALE
+
         return np.ascontiguousarray(rgb.transpose(2, 0, 1)[np.newaxis, ...], dtype=np.float32)
 
     def _age_value(self, outputs) -> float:
@@ -116,6 +121,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             array = np.asarray(output, dtype=np.float32).reshape(-1)
 
             if array.size == DLIB_AGE_WEIGHTS.size:
+
                 return float(np.dot(array, DLIB_AGE_WEIGHTS))
 
         raise RuntimeError(f"expected {DLIB_AGE_WEIGHTS.size} age classes, got {[np.asarray(value).shape for value in outputs]}")
@@ -131,9 +137,11 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 raise RuntimeError("age RKNN returned no outputs")
 
             self.age_runs += 1
+
             return self._age_value(outputs)
         except Exception as exc:
             print(f"[age] inference failed: {exc}")
+
             return fallback
         finally:
             self.age_last_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -143,7 +151,9 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         try:
             details = self.rknn.get_output_details() or []
         except Exception:
+
             return []
+
         return [str(detail.get("name", "")).lower() for detail in details]
 
     def _fairface_sample(self, outputs, mode: str, sharpness: float) -> AttributeSample:
@@ -191,11 +201,13 @@ class RknnGenderAgeEstimator(AttributeEstimator):
     def estimate(self, frame: np.ndarray, face: Face, mode: str) -> AttributeSample | None:
 
         if self.rknn is None:
+
             return None
 
         x1, y1, x2, y2 = map(float, face["box"])
 
         if x2 - x1 < 1 or y2 - y1 < 1:
+
             return None
 
         aligned = crop_face(frame, face, mode, self.input_size)
@@ -213,6 +225,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             self.runs += 1
 
             if self.mivolo:
+
                 return self._mivolo_sample(outputs, mode, float(face.get("sharpness", 0.0)))
 
             if self.fairface:
@@ -221,6 +234,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 if self.age_rknn is not None:
                     age = self._estimate_age(aligned, sample.raw_age)
                     sample = AttributeSample(raw_age=age, gender_logits=sample.gender_logits, align=sample.align, sharpness=sample.sharpness)
+
                 return sample
 
             values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
@@ -231,6 +245,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             return AttributeSample(raw_age=float(values[2]) * 100.0, gender_logits=(float(values[0]), float(values[1])), align=mode, sharpness=float(face.get("sharpness", 0.0)))
         except Exception as exc:
             print(f"[age-gender] inference failed: {exc}")
+
             return None
         finally:
             self.last_ms = round((time.perf_counter() - started) * 1000, 1)

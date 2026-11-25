@@ -10,6 +10,7 @@ def require_token(request: Request, authorization: str | None = Header(default =
     token = os.getenv("API_TOKEN")
 
     if not token:
+
         return
     provided = authorization or ""
 

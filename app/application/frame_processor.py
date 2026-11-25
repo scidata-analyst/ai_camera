@@ -82,4 +82,5 @@ class FrameProcessor:
         if isinstance(self.headpose, HeadPoseService):
             self.last_counts["t_bg_ms"]    = self.headpose.last_ms
             self.last_counts["bg_pending"] = self.headpose.pending
+
         return frame, detections

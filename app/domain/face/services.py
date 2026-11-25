@@ -19,6 +19,7 @@ class FaceQualityService:
 
         if self.blur_threshold > 0 and value < self.blur_threshold:
             face.update({"gender": "Unknown", "gconf": 0.0, "age": 0, "blurry": True,})
+
             return
         face["blurry"] = False
 
@@ -36,9 +37,11 @@ class FaceDetectionService:
 
     @property
     def loaded(self) -> bool:
+
         return bool(self.detector.describe().get("loaded"))
 
     def describe(self) -> dict:
+
         return self.detector.describe()
 
     def _detect_in_humans(self, source_frame, humans) -> list[Face]:
@@ -73,6 +76,7 @@ class FaceDetectionService:
             if any(iou(face["box"], other["box"]) > 0.7 for other in unique):
                 continue
             unique.append(face)
+
         return unique
 
     def detect(self, frame, source_frame, humans=None) -> list[Face]:
@@ -97,4 +101,5 @@ class FaceDetectionService:
             if self.headpose is not None:
                 faces = self.headpose.fill_from_cache(faces)
         self.recognizer.fill(faces)
+
         return faces

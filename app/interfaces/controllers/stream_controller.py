@@ -23,16 +23,19 @@ router        = APIRouter(dependencies=[Depends(require_token)])
 
 @public_router.get("/ubuntu-sans.ttf")
 def ubuntu_sans():
+
     return FileResponse(FONT_PATH, media_type="font/ttf")
 
 
 @router.get("/")
 def index():
+
     return FileResponse(INDEX_PATH, media_type="text/html")
 
 
 @router.get("/video_feed")
 def video_feed(request: Request):
+
     return StreamingResponse(request.app.state.runtime.stream.frames(), media_type = "multipart/x-mixed-replace; boundary=frame")
 
 
@@ -59,6 +62,7 @@ class StreamController:
                 instant                  = 1.0 / max(now - previous, 1e-6)
                 previous                 = now
                 self.processor.infer_fps = (self.processor.infer_fps * 0.9 + instant * 0.1)
+
                 with self._lock:
                     self._latest = annotated
                 time.sleep(0.005)
@@ -70,6 +74,7 @@ class StreamController:
         interval = 1.0 / max(1.0, self.settings.stream_fps)
         while True:
             started = time.time()
+
             with self._lock:
                 reference = self._latest
             image     = reference.copy() if reference is not None else None

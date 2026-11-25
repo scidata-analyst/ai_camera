@@ -32,6 +32,7 @@ def main() -> None:
         if ret != 0:
             raise RuntimeError(f"load_onnx failed: {ret}")
         old_cwd = Path.cwd()
+
         with tempfile.TemporaryDirectory(prefix="onnx-rknn-build-") as tmp:
             os.chdir(tmp)
 

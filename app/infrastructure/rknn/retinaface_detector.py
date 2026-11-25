@@ -20,6 +20,7 @@ class RknnFaceDetector(FaceDetector):
         if settings.face_backend == "off":
             self.rknn      = None
             self.rknn_path = settings.face_rknn_path
+
             return
 
         if settings.face_backend not in ("rknn", ""):
@@ -31,11 +32,13 @@ class RknnFaceDetector(FaceDetector):
         print(f"[face] RetinaFace RKNN NPU active: {self.rknn_path} core={core}")
 
     def describe(self) -> dict:
+
         return {"backend": "rknn" if self.rknn is not None else "off", "rknn_model": self.rknn_path, "loaded": self.rknn is not None,}
 
     def detect(self, frame: np.ndarray) -> list[Face]:
 
         if self.rknn is None:
+
             return []
         height, width = frame.shape[:2]
         image, ratio, pad_x, pad_y = face_letterbox(frame)
@@ -68,6 +71,7 @@ class RknnFaceDetector(FaceDetector):
             selected  = np.flatnonzero(scores >= self.score_thr)
 
             if selected.size == 0:
+
                 return []
             boxes, scores, landmarks = (boxes[selected], scores[selected], landmarks[selected])
             boxes[:, 0::2] = np.clip((boxes[:, 0::2] - pad_x) / ratio, 0, width)
@@ -79,7 +83,9 @@ class RknnFaceDetector(FaceDetector):
             order = scores.argsort()[::-1]
             boxes, scores, points = boxes[order], scores[order], points[order]
             kept = nms(boxes, scores, 0.5)
+
             return[{"box": [int(round(value)) for value in boxes[index]], "conf": round(float(scores[index]), 3), "landmarks": np.rint(points[index]).astype(int).tolist(),} for index in kept]
         except Exception as exc:
             print(f"[face] RetinaFace inference failed: {exc}")
+
             return []

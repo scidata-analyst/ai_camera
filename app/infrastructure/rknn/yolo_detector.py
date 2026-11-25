@@ -40,6 +40,7 @@ class RknnPersonDetector(PersonDetector):
         print(f"[yolo] NPU backend active: {self.rknn_path}")
 
     def describe(self) -> dict:
+
         return {"backend": "rknn", "rknn_model": self.rknn_path, "npu_active": self.rknn is not None, "loaded": self.rknn is not None, "input": rknn_input_summary(self.rknn),}
 
     def _empty(self):
@@ -47,6 +48,7 @@ class RknnPersonDetector(PersonDetector):
         if not self._warned:
             print("[yolo] inference returned no detections")
             self._warned = True
+
         return []
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
@@ -55,12 +57,14 @@ class RknnPersonDetector(PersonDetector):
             raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
 
         try:
+
             return self._detect_boxes(frame)
         except Exception as exc:
 
             if not self._warned:
                 print(f"[yolo] inference failed: {exc}")
                 self._warned = True
+
             return []
 
     def _detect_boxes(self, frame: np.ndarray) -> list[Detection]:
@@ -71,10 +75,12 @@ class RknnPersonDetector(PersonDetector):
         image, ratio, pad_x, pad_y = letterbox(frame, self.imgsz)
         rgb  = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         blob = np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.float32)
+
         with self._lock:
             outputs = rknn_infer(self.rknn, blob, "nhwc", "float32")
 
         if not outputs:
+
             return self._empty()
 
         prediction = None
@@ -93,6 +99,7 @@ class RknnPersonDetector(PersonDetector):
                       f"{[tuple(np.asarray(o).shape) for o in outputs]} "
                       f"-> empty (shape janiye pathao, fix kore debo)")
                 self._warned = True
+
             return []
 
         if prediction.shape[1] == 84:
@@ -114,6 +121,7 @@ class RknnPersonDetector(PersonDetector):
         confs        = person_scores[keep]
 
         if len(confs) == 0:
+
             return []
 
         cx, cy, bw, bh = boxes_cxcywh.T
@@ -130,4 +138,5 @@ class RknnPersonDetector(PersonDetector):
         except Exception:
             picked = list(range(len(nms_boxes)))
         picked = sorted(picked, key=lambda index: -float(confs[index]))
+
         return[{"kind": "human", "class": PERSON_CLASS_NAME, "conf": round(float(confs[index]), 3), "box": [int(corners[index][0]), int(corners[index][1]), int(corners[index][2]), int(corners[index][3])],} for index in picked]

@@ -23,4 +23,5 @@ class HeadPoseAnalyzer(ABC):
         raise NotImplementedError
 
     def submit(self, frame: np.ndarray, faces: list[Face]) -> None:
+
         return None

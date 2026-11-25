@@ -40,13 +40,16 @@ class AttributeRecognitionService(FaceAttributeRecognizer):
         self.aggregator.add(faces)
 
     def fill(self, faces: list[Face]) -> list[Face]:
+
         return self.aggregator.fill(faces)
 
     def results(self) -> dict:
+
         return self.aggregator.results()
 
     def describe(self) -> dict:
         details = dict(self.estimator.describe())
         details.update({"align": self.align_mode, "blur": self.quality.blur_threshold,})
         details.update(self.age.describe())
+
         return details

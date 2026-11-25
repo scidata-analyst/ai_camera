@@ -27,6 +27,7 @@ class OpenCVCamera(FrameSource):
 
     @property
     def connected(self) -> bool:
+
         return self._connected
 
     def _connect(self) -> None:
@@ -63,6 +64,7 @@ class OpenCVCamera(FrameSource):
 
     def start(self) -> None:
         if self.running:
+
             return
         
         self.running = True
@@ -84,6 +86,7 @@ class OpenCVCamera(FrameSource):
                 ok, frame = self.cap.read()
 
                 if ok and frame is not None:
+
                     with self.lock:
                         self.frame = frame
                     time.sleep(0.005)
@@ -92,13 +95,16 @@ class OpenCVCamera(FrameSource):
                     time.sleep(0.5)
                     self._connect()
             else:
+
                 with self.lock:
                     self.frame = self._synthetic()
                 time.sleep(0.05)
 
     def read(self) -> np.ndarray:
+
         with self.lock:
             if self.frame is not None:
+
                 return self.frame.copy()
             
         return self._synthetic()

@@ -20,10 +20,12 @@ MIVOLO_ONNX_SHA256 = ("209c960a71ed51930763984c27912d051e58810170b46b249a3a5235c
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
+
     with path.open("rb") as stream:
 
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+
     return digest.hexdigest()
 
 
@@ -35,7 +37,9 @@ def ensure_mivolo() -> Path:
 
         if sha256(onnx) != MIVOLO_ONNX_SHA256:
             raise SystemExit(f"Checksum mismatch: {onnx}")
+
         return onnx
+
     with tempfile.TemporaryDirectory(prefix="mivolo-onnx-") as tmp:
         archive = Path(tmp) / "model_onnx.zip"
         print(f"[download] {MIVOLO_ZIP_URL}")
@@ -43,6 +47,7 @@ def ensure_mivolo() -> Path:
 
         if sha256(archive) != MIVOLO_ZIP_SHA256:
             raise SystemExit(f"Checksum mismatch: {archive}")
+
         with zipfile.ZipFile(archive) as bundle:
             bundle.extract("model_onnx/mivolo_face_only_rknn.onnx", tmp)
             bundle.extract("model_onnx/mivolo_face_only_rknn.json", tmp)
@@ -52,6 +57,7 @@ def ensure_mivolo() -> Path:
             raise SystemExit(f"Checksum mismatch: {source}")
         source.replace(onnx)
         (Path(tmp) / "model_onnx/mivolo_face_only_rknn.json").replace(report)
+
     return onnx
 
 
@@ -71,6 +77,7 @@ def convert(model: Path, output: Path, target: str, mean_values, std_values, inp
         if ret != 0:
             raise RuntimeError(f"load_onnx failed for {model}: {ret}")
         old_cwd = Path.cwd()
+
         with tempfile.TemporaryDirectory(prefix="face-rknn-build-") as tmp:
             os.chdir(tmp)
 

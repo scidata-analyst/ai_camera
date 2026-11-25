@@ -30,6 +30,7 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
         self._iou_thr  = 0.4
 
         if not self.enabled or settings.headpose_backend == "off":
+
             return
 
         if settings.headpose_backend not in ("rknn", ""):
@@ -43,6 +44,7 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
               f"{self.rknn_path} core={core}")
 
     def describe(self) -> dict:
+
         return {"backend": self.backend, "rknn_model": self.rknn_path, "providers": list(self.providers), "loaded": self.rknn is not None,}
 
     def _infer(self, batch: np.ndarray) -> np.ndarray:
@@ -60,21 +62,25 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
             if not outputs:
                 raise RuntimeError("RKNN returned no outputs")
             rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
+
         return np.asarray(rows, dtype=np.float32)
 
     @staticmethod
     def _preprocess(crop: np.ndarray) -> np.ndarray:
         image = cv2.resize(crop, (WHENET_INPUT_SIZE, WHENET_INPUT_SIZE))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
         return np.transpose(image, (2, 0, 1))[np.newaxis, ...].astype(np.float32)
 
     def predict_crop(self, crop: np.ndarray):
         output = self._infer(self._preprocess(crop))[0]
         yaw, roll, pitch = float(output[0]), float(output[1]), float(output[2])
+
         return yaw, pitch, roll
 
     def remember(self, faces: list[Face]) -> list[Face]:
         now = time.time()
+
         with self._clock:
 
             for face in faces:
@@ -96,13 +102,16 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
 
                 if not replaced:
                     self._cache.append(entry)
+
         return faces
 
     def fill_from_cache(self, faces: list[Face]) -> list[Face]:
 
         if self.rknn is None:
+
             return faces
         now = time.time()
+
         with self._clock:
 
             for face in faces:
@@ -117,11 +126,13 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 if best is not None and best_iou >= self._iou_thr and now - best["t"] <= self._ttl:
                     best["box"] = list(face["box"])
                     face.update({"yaw": best["yaw"], "pitch": best["pitch"], "roll": best["roll"], "looking": best["looking"],})
+
         return faces
 
     def predict_frame(self, frame: np.ndarray, faces: list[Face], min_side: int = 40) -> list[Face]:
 
         if self.rknn is None:
+
             return faces
         height, width = frame.shape[:2]
         blobs, indexes = [], []
@@ -167,4 +178,5 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
 
                 for index in indexes:
                     faces[index].update({"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "looking": False})
+
         return faces

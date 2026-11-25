@@ -80,21 +80,25 @@ def _apply_live(runtime, settings: Settings) -> None:
 
 @router.get("/api/health")
 def health(request: Request):
+
     return request.app.state.runtime.presenter.health()
 
 
 @router.get("/api/faces")
 def faces(request: Request):
+
     return request.app.state.runtime.presenter.faces()
 
 
 @router.get("/api/stats")
 def stats(request: Request):
+
     return request.app.state.runtime.presenter.stats()
 
 
 @router.get("/api/settings")
 def get_settings():
+
     return describe()
 
 
@@ -108,6 +112,7 @@ def post_settings(request: Request, payload: dict[str, object]):
         raise HTTPException(status_code=400, detail=str(exc))
     settings = Settings.from_env()
     _apply_live(request.app.state.runtime, settings)
+
     return {"ok": True, "settings": describe_result, "restart_required": restart_required}
 
 
@@ -117,19 +122,23 @@ def reset_settings(request: Request):
     settings        = Settings.from_env()
     _apply_live(request.app.state.runtime, settings)
     restart_required = [key for key, spec in SPECS.items() if not spec["live"]]
+
     return {"ok": True, "settings": describe_result, "restart_required": restart_required}
 
 
 @router.get("/api/flip")
 def get_flip(request: Request):
+
     return request.app.state.runtime.flip.as_dict()
 
 
 @router.post("/api/flip/set")
 def set_flip(request: Request, h: int | None = None, v: int | None = None):
+
     return request.app.state.runtime.flip.set(h, v)
 
 
 @router.post("/api/flip/toggle")
 def toggle_flip(request: Request, axis: str = "h"):
+
     return request.app.state.runtime.flip.toggle(axis)

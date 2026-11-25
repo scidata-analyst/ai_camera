@@ -26,30 +26,37 @@ def _coerce(key: str, value) -> str:
         lowered = raw.lower()
 
         if lowered in ("1", "true", "yes", "on"):
+
             return "1"
 
         if lowered in ("0", "false", "no", "off"):
+
             return "0"
         raise ValueError(f"{key} must be 0/1/true/false, got {raw!r}")
 
     if kind == "int":
+
         return str(int(raw))
 
     if kind == "float":
+
         return str(float(raw))
     choices = spec.get("choices")
 
     if choices and raw not in choices:
         raise ValueError(f"{key} must be one of {choices}, got {raw!r}")
+
     return raw
 
 
 def current() -> dict[str, str]:
+
     return {key: os.getenv(key, spec["default"]) for key, spec in SPECS.items()}
 
 
 def describe() -> list[dict]:
     values = current()
+
     return[{"key": key, "value": values[key], "group": spec["group"], "type": spec["type"], "live": spec["live"], "choices": spec.get("choices", []),} for key, spec in SPECS.items()]
 
 
@@ -58,9 +65,11 @@ def load_saved() -> None:
     try:
         data = json.loads(SETTINGS_FILE.read_text())
     except (OSError, ValueError):
+
         return
 
     if not isinstance(data, dict):
+
         return
 
     for key, value in data.items():
@@ -90,6 +99,7 @@ def update(values: dict) -> list[dict]:
         SETTINGS_FILE.write_text(json.dumps(merged, indent=2) + "\n")
     except OSError:
         pass
+
     return describe()
 
 
@@ -102,4 +112,5 @@ def reset() -> list[dict]:
         SETTINGS_FILE.unlink()
     except OSError:
         pass
+
     return describe()

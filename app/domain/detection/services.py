@@ -25,16 +25,20 @@ class HumanDetectionService:
 
     @property
     def loaded(self) -> bool:
+
         return bool(self.detector.describe().get("loaded"))
 
     def describe(self) -> dict:
+
         return self.detector.describe()
 
     def _keep(self, detection: Detection) -> bool:
 
         if detection["kind"] != "human":
+
             return False
         x1, y1, x2, y2 = detection["box"]
+
         return (detection["conf"] >= self.conf and (y2 - y1) >= self.min_height)
 
     def _assign_ids(self, detections: list[Detection]) -> None:
@@ -82,15 +86,18 @@ class HumanDetectionService:
             self._has_result = True
         else:
             self._last = [dict(d) for d in self._last if self._keep(d)]
+
         return [dict(d) for d in self._last]
 
     def require_face(self, detections: list[Detection], faces: list[Face]) -> list[Detection]:
 
         if not self.require_face_enabled:
+
             return detections
 
         def has_face(detection: Detection) -> bool:
             x1, y1, x2, y2 = detection["box"]
+
             return any(x1 <= face["box"][0] <= x2 and y1 <= face["box"][1] <= y2 for face in faces)
 
         return[d for d in detections if d["kind"] != "human" or has_face(d)]

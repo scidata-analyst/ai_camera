@@ -9,10 +9,12 @@ from ...config.constants import EXPLICIT_RENDER, RENDER_GLOB, RKNPU_GLOB
 
 
 def dri_devices() -> list:
+
     return sorted(glob.glob(RENDER_GLOB))
 
 
 def rknpu_devices() -> list:
+
     return sorted(glob.glob(RKNPU_GLOB))
 
 
@@ -27,6 +29,7 @@ def dri_driver_map() -> dict:
             result[path] = os.path.basename(os.path.realpath(driver_link))
         else:
             result[path] = None
+
     return result
 
 
@@ -36,6 +39,7 @@ def hw_summary() -> dict:
     drivers     = dri_driver_map()
     npu_dri     = sorted(path for path, driver in drivers.items() if driver and "rknpu" in driver.lower())
     gpu_drivers = ("mali", "panfrost")
+
     return {"render_explicit": EXPLICIT_RENDER, "render_exists": os.path.exists(EXPLICIT_RENDER), "dri": dri, "dri_drivers": drivers, "npu_dri": npu_dri, "rknpu": rknpu, "has_gpu": any(driver and any(g in driver.lower() for g in gpu_drivers) for driver in drivers.values()), "has_npu": bool(rknpu or npu_dri),}
 
 
@@ -46,29 +50,37 @@ def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
 
         if details and index < len(details):
             detail = details[index]
+
             return (str(detail.get("layout", "")).lower(), tuple(int(v) for v in detail.get("shape", ())))
     except Exception:
         pass
+
     return "", ()
 
 
 def _as_4d(blob: np.ndarray, layout: str) -> np.ndarray:
 
     if blob.ndim == 3:
+
         return np.ascontiguousarray(blob[np.newaxis, ...])
+
     return blob
 
 
 def _reorder(blob: np.ndarray, src: str, dst: str) -> np.ndarray:
 
     if not src or not dst or src == dst:
+
         return blob
 
     if src == "nchw" and dst == "nhwc":
+
         return np.ascontiguousarray(np.transpose(blob, (0, 2, 3, 1)))
 
     if src == "nhwc" and dst == "nchw":
+
         return np.ascontiguousarray(np.transpose(blob, (0, 3, 1, 2)))
+
     return blob
 
 
@@ -94,8 +106,10 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
         kwargs["data_type"] = dtype
 
     try:
+
         return rknn.inference(**kwargs)
     except TypeError:
+
         return rknn.inference(inputs=[blob])
     except Exception as exc:
         other = "nhwc" if layout == "nchw" else "nchw"
@@ -108,6 +122,7 @@ def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
                 retry["data_type"] = dtype
 
             try:
+
                 return rknn.inference(**retry)
             except Exception:
                 pass
@@ -121,10 +136,13 @@ def rknn_input_summary(rknn) -> dict:
         details = rknn.get_input_details()
 
         if not details:
+
             return {}
         detail = details[0]
+
         return {"shape": tuple(int(v) for v in detail.get("shape", ())), "dtype": str(detail.get("dtype", "")), "layout": str(detail.get("layout", "")).lower(),}
     except Exception:
+
         return {}
 
 
@@ -153,4 +171,5 @@ def rknn_load(path: str, label: str = "model") -> tuple:
 
     if ret != 0:
         raise RuntimeError(f"[{label}] init_runtime failed: ret={ret}")
+
     return rknn, core
