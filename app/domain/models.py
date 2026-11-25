@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 Detection = dict[str, Any]
-Face = dict[str, Any]
+Face      = dict[str, Any]
 
 
 @dataclass(frozen=True)

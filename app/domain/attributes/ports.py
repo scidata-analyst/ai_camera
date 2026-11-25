@@ -7,8 +7,7 @@ from ..models import AttributeSample, Face
 
 class AttributeEstimator(ABC):
     @abstractmethod
-    def estimate(self, frame: np.ndarray, face: Face,
-                 mode: str) -> AttributeSample | None:
+    def estimate(self, frame: np.ndarray, face: Face, mode: str) -> AttributeSample | None:
         raise NotImplementedError
 
     @abstractmethod
