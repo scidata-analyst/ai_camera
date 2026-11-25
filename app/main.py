@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import cv2
 import numpy as np
-from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 
@@ -26,7 +26,20 @@ from .interfaces.auth import require_token
 WEB_DIR     = Path(__file__).resolve().parent / "interfaces" / "web"
 INDEX_PATH  = WEB_DIR / "index.html"
 FONT_PATH   = WEB_DIR / "UbuntuSans.ttf"
-_FONT_CACHE = {}
+_FONT_CACHE   = {}
+_PLACEHOLDER  = None
+
+
+def _placeholder() -> np.ndarray:
+    global _PLACEHOLDER
+
+    if _PLACEHOLDER is None:
+        image = Image.fromarray(np.zeros((480, 640, 3), dtype=np.uint8))
+        draw  = ImageDraw.Draw(image)
+        draw.text((30, 220), "Waiting for frames...", font=_font(26), fill=(200, 210, 225))
+        _PLACEHOLDER = np.asarray(image).copy()
+
+    return _PLACEHOLDER
 
 
 def _token_ok(token: str | None) -> bool:
@@ -121,6 +134,7 @@ class Pipeline:
         self._lock    = threading.Lock()
         self.latest_batch = []
         self.result       = {}
+        self.last_error   = None
         self.stats        = {"batches": 0, "frames_in": 0, "frames_out": 0}
         self._thread      = None
 
@@ -150,6 +164,7 @@ class Pipeline:
             return {
                 "result": {str(key): value for key, value in self.result.items()},
                 "stats": dict(self.stats),
+                "last_error": self.last_error,
             }
 
     def frames(self):
@@ -163,11 +178,10 @@ class Pipeline:
                 batch = list(self.latest_batch)
 
             if not batch:
-                time.sleep(0.05)
-
-                continue
-            frame = batch[index % len(batch)]
-            index += 1
+                frame = _placeholder()
+            else:
+                frame = batch[index % len(batch)]
+                index += 1
             ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
 
             if ok:
@@ -213,19 +227,25 @@ class Pipeline:
             self._flush(batch)
 
     def _flush(self, batch: list) -> None:
+        started = time.perf_counter()
 
         try:
             annotated, result = self._process(batch)
         except Exception as exc:
-            print(f"[batch] {exc}")
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            print(f"[batch] {self.last_error}")
 
             return
+
+        elapsed = round((time.perf_counter() - started) * 1000, 1)
 
         with self._lock:
             self.latest_batch    = annotated
             self.result          = result
+            self.last_error      = None
             self.stats["batches"] += 1
             self.stats["frames_out"] += len(annotated)
+        print(f"[batch] in={len(batch)} people={len(result)} ms={elapsed}")
 
     def _process(self, batch: list) -> tuple[list, dict]:
         records = []
@@ -492,3 +512,26 @@ def health(request: Request):
         "age_loaded": bool(age.get("age_loaded")),
         "models": details,
     }
+
+
+@app.post("/api/debug/frame", dependencies=[Depends(require_token)])
+async def debug_frame(request: Request):
+    data  = await request.body()
+    frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+
+    if frame is None:
+
+        raise HTTPException(status_code=400, detail="Invalid JPEG bytes")
+    request.app.state.runtime.pipeline.push(frame)
+
+    return {"queued": 1}
+
+
+@app.post("/api/debug/synthetic", dependencies=[Depends(require_token)])
+def debug_synthetic(request: Request):
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (120, 80), (420, 440), (60, 60, 60), -1)
+    cv2.putText(frame, "DEBUG FRAME", (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 2)
+    request.app.state.runtime.pipeline.push(frame)
+
+    return {"queued": 1}
