@@ -48,7 +48,7 @@ class FrameProcessor:
         faces      = []
 
         if self.face_detection is not None:
-            faces = self.face_detection.detect(frame, source_frame, detections)
+            faces = self.face_detection.detect(source_frame, detections)
             self.renderer.draw_faces(frame, faces)
         detections = self.human_detection.require_face(detections, faces)
         self._apply_attributes(detections)

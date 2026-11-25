@@ -68,7 +68,7 @@ def _build_runtime() -> SimpleNamespace:
     presenter            = StatsPresenter(settings, camera, processor, flip, hardware)
     stream               = StreamController(camera, processor, settings, flip)
 
-    return SimpleNamespace(settings = settings, hardware = hardware, camera = camera, processor = processor, presenter = presenter, stream = stream, flip = flip)
+    return SimpleNamespace(settings = settings, camera = camera, processor = processor, presenter = presenter, stream = stream, flip = flip)
 
 
 @asynccontextmanager
