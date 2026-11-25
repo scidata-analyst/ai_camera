@@ -26,9 +26,8 @@ from .interfaces.auth import require_token
 WEB_DIR     = Path(__file__).resolve().parent / "interfaces" / "web"
 INDEX_PATH  = WEB_DIR / "index.html"
 FONT_PATH   = WEB_DIR / "UbuntuSans.ttf"
-_FONT_CACHE          = {}
-_PLACEHOLDER         = None
-_SAMPLES_PER_PERSON  = 3
+_FONT_CACHE  = {}
+_PLACEHOLDER = None
 
 
 def _placeholder() -> np.ndarray:
@@ -90,6 +89,10 @@ class _Tracker:
         self._boxes = {}
 
     def match(self, boxes: list[list[int]]) -> list[tuple[int, list[int]]]:
+
+        if not boxes:
+
+            return []
         used    = set()
         matched = []
 
@@ -194,7 +197,7 @@ class Pipeline:
                 stamp, frame = self.incoming.get(timeout=0.05)
             except queue.Empty:
 
-                if batch and time.time() >= deadline:
+                if batch and time.time() >= deadline and self.incoming.qsize() == 0:
                     self._flush(batch)
                     batch, current, deadline = [], None, 0.0
 
@@ -205,7 +208,7 @@ class Pipeline:
                 current  = second
                 deadline = second + 1.0
 
-            if second != current or time.time() >= deadline:
+            if second != current:
 
                 if batch:
                     self._flush(batch)
@@ -214,7 +217,7 @@ class Pipeline:
                 deadline = second + 1.0
             batch.append((stamp, frame))
 
-            if time.time() >= deadline:
+            if time.time() >= deadline and self.incoming.qsize() == 0:
                 self._flush(batch)
                 batch, current, deadline = [], None, 0.0
 
@@ -241,7 +244,8 @@ class Pipeline:
             self.last_error      = None
             self.stats["batches"] += 1
             self.stats["frames_out"] += len(annotated)
-        print(f"[batch] in={len(batch)} people={len(result)} ms={elapsed}")
+        faces = sum(int(value.get("samples", 0)) for value in result.values())
+        print(f"[batch] in={len(batch)} faces={faces} people={len(result)} ms={elapsed}")
 
     def _process(self, batch: list) -> tuple[list, dict]:
         with self._lock:
@@ -253,7 +257,7 @@ class Pipeline:
         for _, frame in batch:
             view   = frame.copy()
             people = self._people(view)
-            faces  = self._faces(view, people)
+            faces  = self._faces(view, people) if people else []
 
             for face in faces:
                 person_id = face.get("person_id")
@@ -269,16 +273,12 @@ class Pipeline:
         result = {}
 
         for person_id, entries in by_person.items():
-            eligible = [entry for entry in entries if entry[0].get("eligible")]
-            eligible.sort(
-                key=lambda entry: (entry[0].get("sharpness", 0.0), entry[0].get("area", 0)),
-                reverse=True,
-            )
-            chosen = eligible[:_SAMPLES_PER_PERSON]
             values = []
 
-            for face, view in chosen:
-                self._attributes(view, face)
+            for face, view in entries:
+                if not self._attributes(view, face):
+
+                    continue
                 values.append((
                     face.get("age", 0),
                     face.get("gender", "Unknown"),
@@ -296,12 +296,13 @@ class Pipeline:
                     "model_runs": len(values),
                 }
             else:
+                prior = previous.get(person_id, {})
                 result[person_id] = {
-                    "age": 0,
-                    "gender": "Unknown",
-                    "looking": False,
+                    "age": prior.get("age", 0),
+                    "gender": prior.get("gender", "Unknown"),
+                    "looking": bool(prior.get("looking", False)),
                     "samples": len(entries),
-                    "confidence": 0.0,
+                    "confidence": float(prior.get("confidence", 0.0)),
                     "model_runs": 0,
                 }
 
@@ -330,12 +331,20 @@ class Pipeline:
             if detection.get("kind") != "human":
 
                 continue
+            confidence = float(detection.get("conf", 0.0))
+
+            if confidence < self.settings.person_conf:
+
+                continue
             box = [int(value) for value in detection["box"]]
 
             if box[2] - box[0] < 1 or box[3] - box[1] < 1:
 
                 continue
-            boxes.append((box, float(detection.get("conf", 0.0))))
+            if box[3] - box[1] < self.settings.person_min_h:
+
+                continue
+            boxes.append((box, confidence))
 
         matched = self.tracker.match([box for box, _ in boxes])
         people  = []
@@ -370,6 +379,9 @@ class Pipeline:
                 continue
 
             for face in detected:
+                if float(face.get("conf", 0.0)) < self.settings.face_score:
+
+                    continue
                 fx1, fy1, fx2, fy2 = (int(value) for value in face["box"])
                 face["box"] = [fx1 + x1, fy1 + y1, fx2 + x1, fy2 + y1]
                 landmarks   = face.get("landmarks")
@@ -398,33 +410,21 @@ class Pipeline:
         face.setdefault("gender", "Unknown")
         face.setdefault("age", 0)
         face.setdefault("gconf", 0.0)
-        face["eligible"] = False
-        face["blurry"]   = False
-        x1, y1, x2, y2   = face["box"]
-
-        if min(x2 - x1, y2 - y1) < self.settings.face_min_size:
-
-            return
-        value             = sharpness(frame, face["box"])
-        face["sharpness"] = round(value, 1)
+        x1, y1, x2, y2 = face["box"]
+        face["sharpness"] = round(sharpness(frame, face["box"]), 1)
         face["area"]      = (x2 - x1) * (y2 - y1)
+        face["eligible"]  = True
 
-        if self.settings.face_blur > 0 and value < self.settings.face_blur:
-            face["blurry"] = True
-
-            return
-        face["eligible"] = self.age is not None
-
-    def _attributes(self, frame: np.ndarray, face: dict) -> None:
+    def _attributes(self, frame: np.ndarray, face: dict) -> bool:
 
         if self.age is None:
 
-            return
+            return False
         sample = self.age.estimate(frame, face, self.settings.age_align)
 
         if sample is None:
 
-            return
+            return False
         raw_age         = float(sample.raw_age)
         face["age"]     = int(round(raw_age))
         face["raw_age"] = round(raw_age, 1)
@@ -436,6 +436,8 @@ class Pipeline:
         face["gender"]  = "Male" if chosen == 1 else "Female"
         face["gconf"]   = round(float(probs[chosen]), 3)
         face["align"]   = sample.align
+
+        return True
 
     def _draw(self, frame: np.ndarray, people: list[dict], faces: list[dict], result: dict) -> None:
         image = Image.fromarray(frame)
