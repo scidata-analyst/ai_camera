@@ -140,6 +140,8 @@ class Pipeline:
         self.live         = None
         self.result       = {}
         self.last_error   = None
+        self.timings      = {"yolo": 0.0, "face": 0.0, "age": 0.0}
+        self.top_frame    = 0
         self.stats        = {"batches": 0, "frames_in": 0, "frames_out": 0}
         self._thread      = None
 
@@ -169,6 +171,7 @@ class Pipeline:
             return {
                 "result": {str(key): value for key, value in self.result.items()},
                 "stats": dict(self.stats),
+                "timings_ms": {key: round(value * 1000, 1) for key, value in self.timings.items()},
                 "last_error": self.last_error,
             }
 
@@ -244,20 +247,61 @@ class Pipeline:
             self.last_error      = None
             self.stats["batches"] += 1
             self.stats["frames_out"] += len(annotated)
-        faces = sum(int(value.get("samples", 0)) for value in result.values())
-        print(f"[batch] in={len(batch)} faces={faces} people={len(result)} ms={elapsed}")
+        faces    = sum(int(value.get("samples", 0)) for value in result.values())
+        model_ms = sum(value * 1000 for value in self.timings.values())
+        other_ms = max(0.0, elapsed - model_ms)
+        print(
+            f"[batch] in={len(batch)} top={self.top_frame} faces={faces} people={len(result)} ms={elapsed} "
+            f"yolo={self.timings['yolo'] * 1000:.0f} "
+            f"face={self.timings['face'] * 1000:.0f} "
+            f"age={self.timings['age'] * 1000:.0f} "
+            f"other={other_ms:.0f}"
+        )
 
     def _process(self, batch: list) -> tuple[list, dict]:
         with self._lock:
             previous = dict(self.result)
 
+        timings   = {"yolo": 0.0, "face": 0.0, "age": 0.0}
         records   = []
         by_person = defaultdict(list)
 
         for _, frame in batch:
-            view   = frame.copy()
-            people = self._people(view)
-            faces  = self._faces(view, people) if people else []
+            view    = frame.copy()
+            started = time.perf_counter()
+            people  = self._people(view)
+            timings["yolo"] += time.perf_counter() - started
+
+            self._draw(view, people, [], previous)
+
+            with self._lock:
+                self.live = view.copy()
+            records.append((view, people, []))
+
+        best_index = None
+        best_score = (-1.0, -1.0)
+
+        for index, (view, people, _) in enumerate(records):
+
+            if not people:
+
+                continue
+            score = (
+                sum(float(person.get("conf", 0.0)) for person in people),
+                max(sharpness(view, person["box"]) for person in people),
+            )
+
+            if score > best_score:
+                best_score = score
+                best_index = index
+        self.top_frame = 0 if best_index is None else best_index + 1
+
+        if best_index is not None:
+            view, people, _ = records[best_index]
+            started = time.perf_counter()
+            faces = self._faces(view, people)
+            timings["face"] += time.perf_counter() - started
+            records[best_index] = (view, people, faces)
 
             for face in faces:
                 person_id = face.get("person_id")
@@ -268,7 +312,6 @@ class Pipeline:
 
             with self._lock:
                 self.live = view.copy()
-            records.append((view, people, faces))
 
         result = {}
 
@@ -276,7 +319,11 @@ class Pipeline:
             values = []
 
             for face, view in entries:
-                if not self._attributes(view, face):
+                started = time.perf_counter()
+                ok = self._attributes(view, face)
+                timings["age"] += time.perf_counter() - started
+
+                if not ok:
 
                     continue
                 values.append((
@@ -320,6 +367,8 @@ class Pipeline:
         for view, people, faces in records:
             self._draw(view, people, faces, result)
             annotated.append(view)
+
+        self.timings = timings
 
         return annotated, result
 
