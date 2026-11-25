@@ -31,14 +31,17 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         if settings.age_backend == "off":
             self.rknn = None
             self.rknn_path = settings.age_rknn_path
+
         else:
             if settings.age_backend not in ("rknn", ""):
                 raise RuntimeError(
                     f"AGE_GENDER_BACKEND={settings.age_backend!r} is disabled "
                     "in NPU-only mode")
+
             self.rknn_path = settings.age_rknn_path
             self.rknn, core = rknn_load(self.rknn_path, "age-gender")
             print(f"[age-gender] RKNN NPU active: {self.rknn_path} core={core}")
+
         self.onnx_path = settings.age_onnx_path
         path = str(self.rknn_path).lower()
         self.mivolo = "mivolo" in path
@@ -56,6 +59,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         if self.rknn is not None and self.fairface and self.age_rknn_path:
             self.age_rknn, age_core = rknn_load(self.age_rknn_path, "age")
             print(f"[age] RKNN NPU active: {self.age_rknn_path} core={age_core}")
+
         self.runs = 0
         self.last_ms = 0.0
 
@@ -94,13 +98,16 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 y = (self.input_size - size[1]) // 2
                 canvas[y:y + size[1], x:x + size[0]] = resized
                 aligned = canvas
+
             rgb = aligned[:, :, ::-1]
             return np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.uint8)
+
         if self.fairface:
             rgb = aligned[:, :, ::-1].astype(np.float32) / 255.0
             rgb = (rgb - self._mean) / self._std
             return np.ascontiguousarray(
                 rgb.transpose(2, 0, 1)[np.newaxis, ...], dtype=np.float32)
+
         blob = cv2.dnn.blobFromImage(
             aligned, scalefactor=1.0,
             size=(self.input_size, self.input_size),
@@ -123,6 +130,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             array = np.asarray(output, dtype=np.float32).reshape(-1)
             if array.size == DLIB_AGE_WEIGHTS.size:
                 return float(np.dot(array, DLIB_AGE_WEIGHTS))
+
         raise RuntimeError(
             f"expected {DLIB_AGE_WEIGHTS.size} age classes, got "
             f"{[np.asarray(value).shape for value in outputs]}")
@@ -134,6 +142,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             outputs = rknn_infer(self.age_rknn, blob, "nchw", "float32")
             if not outputs:
                 raise RuntimeError("age RKNN returned no outputs")
+
             self.age_runs += 1
             return self._age_value(outputs)
         except Exception as exc:
@@ -161,20 +170,27 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             name = names[index] if index < len(names) else ""
             if gender is None and ("gender" in name or array.size == 2):
                 gender = array
+
             elif age_bins is None and ("age_prob" in name or array.size == 9):
                 age_bins = array
+
             elif age is None and ("age_value" in name or array.size == 1):
                 age = float(array[0])
+
         if gender is None and len(arrays) > 1:
             gender = arrays[1]
+
         if age is None and age_bins is not None:
             age = float(np.dot(age_bins, FAIRFACE_AGE_BINS))
+
         if age is None and len(arrays) > 2:
             age = float(arrays[2][0])
+
         if gender is None or gender.size < 2 or age is None:
             raise RuntimeError(
                 f"expected FairFace gender/age outputs, got "
                 f"{[array.shape for array in arrays]}")
+
         return AttributeSample(
             raw_age=age,
             gender_logits=(float(gender[1]), float(gender[0])),
@@ -188,6 +204,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
         if values.size != 3:
             raise RuntimeError(
                 f"expected 3 MiVOLO outputs, got {values.shape}")
+
         age = (float(values[2]) * (MIVOLO_AGE_MAX - MIVOLO_AGE_MIN)
                + MIVOLO_AGE_AVG)
         age = min(max(age, MIVOLO_AGE_MIN), MIVOLO_AGE_MAX)
@@ -202,9 +219,11 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                  mode: str) -> AttributeSample | None:
         if self.rknn is None:
             return None
+
         x1, y1, x2, y2 = map(float, face["box"])
         if x2 - x1 < 1 or y2 - y1 < 1:
             return None
+
         aligned = crop_face(frame, face, mode, self.input_size)
         blob = self._blob(aligned)
         layout = "nhwc" if (self.mivolo or not self.fairface) else "nchw"
@@ -214,10 +233,12 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             outputs = rknn_infer(self.rknn, blob, layout, dtype)
             if not outputs:
                 raise RuntimeError("RKNN returned no outputs")
+
             self.runs += 1
             if self.mivolo:
                 return self._mivolo_sample(
                     outputs, mode, float(face.get("sharpness", 0.0)))
+
             if self.fairface:
                 sample = self._fairface_sample(
                     outputs, mode, float(face.get("sharpness", 0.0)))
@@ -229,11 +250,14 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                         align=sample.align,
                         sharpness=sample.sharpness,
                     )
+
                 return sample
+
             values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
             if values.size != 3:
                 raise RuntimeError(
                     f"expected 3 age/gender outputs, got {values.shape}")
+
             return AttributeSample(
                 raw_age=float(values[2]) * 100.0,
                 gender_logits=(float(values[0]), float(values[1])),
