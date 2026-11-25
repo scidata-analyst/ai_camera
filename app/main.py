@@ -5,6 +5,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -144,6 +145,13 @@ class Pipeline:
         self.face     = RknnFaceDetector(settings) if settings.face_enable else None
         face_loaded   = self.face is not None and self.face.describe().get("loaded", False)
         self.age      = RknnGenderAgeEstimator(settings) if face_loaded else None
+        self.age_extra = None
+        if face_loaded and settings.age_extra_rknn_path:
+            try:
+                extra_settings = replace(settings, age_rknn_path=settings.age_extra_rknn_path)
+                self.age_extra = RknnGenderAgeEstimator(extra_settings)
+            except Exception as exc:
+                print(f"[age-extra] disabled: {exc}")
         self.tracker  = _Tracker()
         self.incoming = queue.Queue()
         self.stop     = threading.Event()
@@ -244,6 +252,7 @@ class Pipeline:
             "person": self.person.describe(),
             "face": self.face.describe() if self.face is not None else None,
             "age_gender": self.age.describe() if self.age is not None else None,
+            "age_extra": self.age_extra.describe() if self.age_extra is not None else None,
         }
 
     def snapshot(self) -> dict:
@@ -408,11 +417,14 @@ class Pipeline:
                 if not ok:
 
                     continue
+                sources = face.get("age_sources", {})
                 values.append((
                     face.get("age", 0),
                     face.get("gender", "Unknown"),
                     bool(face.get("looking")),
                     float(face.get("gconf", 0.0)),
+                    sources.get("mivolo"),
+                    sources.get("genderage"),
                 ))
 
             if values:
@@ -420,6 +432,8 @@ class Pipeline:
                     "age": _mode([value[0] for value in values]),
                     "gender": _mode([value[1] for value in values]),
                     "looking": _mode([value[2] for value in values]),
+                    "age_mivolo": _mode([value[4] for value in values]),
+                    "age_genderage": _mode([value[5] for value in values]),
                     "samples": len(entries),
                     "confidence": round(sum(value[3] for value in values) / len(values), 3),
                     "model_runs": len(values),
@@ -430,6 +444,8 @@ class Pipeline:
                     "age": prior.get("age", 0),
                     "gender": prior.get("gender", "Unknown"),
                     "looking": bool(prior.get("looking", False)),
+                    "age_mivolo": prior.get("age_mivolo"),
+                    "age_genderage": prior.get("age_genderage"),
                     "samples": len(entries),
                     "confidence": float(prior.get("confidence", 0.0)),
                     "model_runs": 0,
@@ -554,9 +570,21 @@ class Pipeline:
         if sample is None:
 
             return False
-        raw_age         = float(sample.raw_age)
-        face["age"]     = int(round(raw_age))
-        face["raw_age"] = round(raw_age, 1)
+        mivolo_age    = float(sample.raw_age)
+        genderage_age = None
+
+        if self.age_extra is not None:
+            extra = self.age_extra.estimate(frame, face, self.settings.age_align)
+
+            if extra is not None:
+                genderage_age = float(extra.raw_age)
+        final_age = (mivolo_age + genderage_age) / 2.0 if genderage_age is not None else mivolo_age
+        face["age"]     = int(round(final_age))
+        face["raw_age"] = round(final_age, 1)
+        face["age_sources"] = {
+            "mivolo": round(mivolo_age, 1),
+            "genderage": None if genderage_age is None else round(genderage_age, 1),
+        }
         logits          = np.asarray(sample.gender_logits, dtype=np.float32)
         logits          = logits - float(np.max(logits))
         probs           = np.exp(logits)
@@ -648,12 +676,15 @@ def health(request: Request):
     pipeline = request.app.state.runtime.pipeline
     details  = pipeline.describe()
     age      = details.get("age_gender") or {}
+    extra    = details.get("age_extra") or {}
 
     return {
         "age_gender_backend": age.get("backend"),
         "age_gender_model_kind": age.get("model_kind"),
         "age_source": age.get("age_source"),
         "age_loaded": bool(age.get("age_loaded")),
+        "age_extra_model": extra.get("rknn_model"),
+        "age_extra_loaded": bool(extra.get("loaded")),
         "camera": dict(pipeline.camera_info),
         "models": details,
     }

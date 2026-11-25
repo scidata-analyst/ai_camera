@@ -50,6 +50,7 @@ services:
       - FACE_BLUR=80
       - AGE_GENDER_BACKEND=rknn
       - AGE_GENDER_RKNN_MODEL=/app/models/mivolo-face-rk3576.rknn
+      - AGE_EXTRA_RKNN_MODEL=/app/models/genderage-rk3576.rknn
       - AGE_GENDER_ALIGN=arcface
       - AGE_RKNN_MODEL=/app/models/dlib-age-rk3576.rknn
       - HEADPOSE_ENABLE=1
