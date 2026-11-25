@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hmac
-import os
 import queue
 import threading
 import time
@@ -12,7 +10,7 @@ from types import SimpleNamespace
 
 import cv2
 import numpy as np
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 
@@ -40,16 +38,6 @@ def _placeholder() -> np.ndarray:
         _PLACEHOLDER = np.asarray(image).copy()
 
     return _PLACEHOLDER
-
-
-def _token_ok(token: str | None) -> bool:
-    expected = os.getenv("API_TOKEN")
-
-    if not expected:
-
-        return True
-
-    return bool(token) and hmac.compare_digest(token, expected)
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont:
@@ -142,21 +130,86 @@ class Pipeline:
         self.last_error   = None
         self.timings      = {"yolo": 0.0, "face": 0.0, "age": 0.0}
         self.top_frame    = 0
+        self.camera_info  = {}
         self.stats        = {"batches": 0, "frames_in": 0, "frames_out": 0}
         self._thread      = None
+        self.capture_thread = None
 
     def start(self) -> None:
 
         if self._thread is None:
             self._thread = threading.Thread(target=self._work, daemon=True)
             self._thread.start()
+        if self.capture_thread is None:
+            self.capture_thread = threading.Thread(target=self._capture, daemon=True)
+            self.capture_thread.start()
 
     def stop(self) -> None:
         self.stop.set()
 
     def push(self, frame: np.ndarray) -> None:
         self.incoming.put((time.time(), frame))
-        self.stats["frames_in"] += 1
+
+        with self._lock:
+            self.stats["frames_in"] += 1
+
+    def _capture(self) -> None:
+        source = self.settings.camera_source
+
+        try:
+            if source.isdigit():
+                cap = cv2.VideoCapture(int(source))
+            else:
+                cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+        except Exception as exc:
+            self.last_error = f"camera open error: {exc}"
+            print(f"[camera] {self.last_error}")
+
+            return
+
+        if not cap.isOpened():
+            self.last_error = f"camera open failed: {source}"
+            print(f"[camera] {self.last_error}")
+
+            return
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.settings.frame_width))
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.settings.frame_height))
+        cap.set(cv2.CAP_PROP_FPS, float(self.settings.capture_fps))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        interval = 1.0 / max(1.0, self.settings.capture_fps)
+        next_at  = time.perf_counter()
+        self.camera_info = {
+            "source": source,
+            "opened": True,
+            "fps": self.settings.capture_fps,
+            "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        }
+        print(f"[camera] {source} opened at {self.settings.capture_fps:g} fps")
+
+        try:
+
+            while not self.stop.is_set():
+                ok, frame = cap.read()
+
+                if ok and frame is not None:
+                    self.push(frame)
+                else:
+                    self.last_error = "camera read failed"
+                    time.sleep(interval)
+
+                    continue
+                next_at += interval
+                delay = next_at - time.perf_counter()
+
+                if delay > 0:
+                    time.sleep(delay)
+                else:
+                    next_at = time.perf_counter()
+        finally:
+            cap.release()
+            self.camera_info = {"source": source, "opened": False}
 
     def describe(self) -> dict:
         return {
@@ -171,6 +224,7 @@ class Pipeline:
             return {
                 "result": {str(key): value for key, value in self.result.items()},
                 "stats": dict(self.stats),
+                "camera": dict(self.camera_info),
                 "timings_ms": {key: round(value * 1000, 1) for key, value in self.timings.items()},
                 "last_error": self.last_error,
             }
@@ -533,7 +587,7 @@ async def lifespan(app: FastAPI):
         pipeline.stop()
 
 
-app = FastAPI(title="AI Camera - streaming frames + per-person mode", lifespan=lifespan)
+app = FastAPI(title="AI Camera - Python capture + per-person mode", lifespan=lifespan)
 
 
 @app.get("/ubuntu-sans.ttf")
@@ -546,28 +600,6 @@ def ubuntu_sans():
 def index():
 
     return FileResponse(INDEX_PATH, media_type="text/html")
-
-
-@app.websocket("/api/capture/stream")
-async def capture_stream(websocket: WebSocket):
-
-    if not _token_ok(websocket.query_params.get("token")):
-        await websocket.close(code=1008)
-
-        return
-    await websocket.accept()
-    pipeline = websocket.app.state.runtime.pipeline
-
-    try:
-
-        while True:
-            data  = await websocket.receive_bytes()
-            frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-
-            if frame is not None:
-                pipeline.push(frame)
-    except (WebSocketDisconnect, RuntimeError):
-        pass
 
 
 @app.get("/api/output/stream")
@@ -596,6 +628,7 @@ def health(request: Request):
         "age_gender_model_kind": age.get("model_kind"),
         "age_source": age.get("age_source"),
         "age_loaded": bool(age.get("age_loaded")),
+        "camera": dict(pipeline.camera_info),
         "models": details,
     }
 

@@ -21,7 +21,7 @@ body {
   gap: 12px;
   padding: 16px;
 }
-h1 { margin: 0; font-size: 22px; font-weight: 600; }
+h1 { margin: 0; font-size: 20px; font-weight: 600; text-align: center; }
 .stage {
   width: min(96vw, 960px);
   background: #000;
@@ -30,7 +30,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 600; }
   overflow: hidden;
   line-height: 0;
 }
-.stage img, .stage video { width: 100%; height: auto; display: block; }
+.stage img { width: 100%; height: auto; display: block; }
 .row {
   width: min(96vw, 960px);
   display: flex;
@@ -45,13 +45,16 @@ h1 { margin: 0; font-size: 22px; font-weight: 600; }
   padding: 12px;
 }
 .card h2 { margin: 0 0 8px; font-size: 15px; }
-#result { font-size: 13px; white-space: pre-wrap; color: #b8c4d6; }
-#status { font-size: 13px; color: #9fb0c8; }
-video { display: none; }
+#result, #status {
+  font-size: 13px;
+  white-space: pre-wrap;
+  color: #b8c4d6;
+}
+#status { color: #9fb0c8; }
 </style>
 </head>
 <body>
-<h1>AI Camera — framed capture → per-second batch → labeled stream</h1>
+<h1>AI Camera — Python capture → 20 fps → top-1 frame → person-wise age/gender</h1>
 
 <div class="stage"><img id="out" alt="processed stream"></div>
 
@@ -66,59 +69,38 @@ video { display: none; }
   </div>
 </div>
 
-<video id="cam" autoplay muted playsinline></video>
-
 <script>
 (() => {
   const token = new URLSearchParams(location.search).get('token') || '';
-  const status = document.getElementById('status');
-  const resultBox = document.getElementById('result');
-  const cam = document.getElementById('cam');
-  const out = document.getElementById('out');
-
   const suffix = token ? `?token=${encodeURIComponent(token)}` : '';
+  const out = document.getElementById('out');
+  const resultBox = document.getElementById('result');
+  const statusBox = document.getElementById('status');
+
   out.src = `/api/output/stream${suffix}`;
 
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${scheme}//${location.host}/api/capture/stream${suffix}`);
-
-  socket.onopen = () => { status.textContent = 'upload stream connected'; };
-  socket.onclose = () => { status.textContent = 'upload stream closed'; };
-  socket.onerror = () => { status.textContent = 'upload stream error'; };
-
-  navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-    audio: false
-  }).then(stream => {
-    cam.srcObject = stream;
-    return cam.play();
-  }).then(() => {
-    status.textContent = 'camera live — sending frames';
-    const canvas = document.createElement('canvas');
-    canvas.width = cam.videoWidth || 640;
-    canvas.height = cam.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
-
-    setInterval(() => {
-      if (cam.readyState < 2 || socket.readyState !== WebSocket.OPEN) return;
-      ctx.drawImage(cam, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => {
-        if (blob && socket.readyState === WebSocket.OPEN) socket.send(blob);
-      }, 'image/jpeg', 0.7);
-    }, 40);
-  }).catch(err => {
-    status.textContent = `camera error: ${err.message}`;
-  });
-
-  setInterval(async () => {
+  async function refresh() {
     try {
       const response = await fetch(`/api/result${suffix}`);
       const data = await response.json();
-      resultBox.textContent = JSON.stringify(data.result, null, 2) + '\n' + JSON.stringify(data.stats);
+      const cam = data.camera || {};
+      const stats = data.stats || {};
+      const timings = data.timings_ms || {};
+
+      resultBox.textContent = JSON.stringify(data.result, null, 2);
+      statusBox.textContent = [
+        `camera: ${cam.opened ? 'open' : 'closed'} ${cam.source || ''} @ ${cam.fps || 0} fps`,
+        `frames_in=${stats.frames_in} batches=${stats.batches} frames_out=${stats.frames_out}`,
+        `yolo=${timings.yolo ?? 0}ms face=${timings.face ?? 0}ms age=${timings.age ?? 0}ms`,
+        data.last_error ? `error: ${data.last_error}` : ''
+      ].filter(Boolean).join('\n');
     } catch (err) {
-      resultBox.textContent = `result error: ${err.message}`;
+      statusBox.textContent = `status error: ${err.message}`;
     }
-  }, 1000);
+  }
+
+  refresh();
+  setInterval(refresh, 1000);
 })();
 </script>
 </body>
