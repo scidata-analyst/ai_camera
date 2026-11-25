@@ -25,13 +25,16 @@ class AttributeRecognitionService(FaceAttributeRecognizer):
         for face in faces:
             x1, y1, x2, y2 = face["box"]
             if min(x2 - x1, y2 - y1) < self.min_size:
+
                 face.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
                 continue
             self.quality.evaluate(frame, face)
             if face.get("blurry"):
+
                 continue
             sample = self.estimator.estimate(frame, face, self.align_mode)
             if sample is None:
+
                 face.update({"gender": "Unknown", "gconf": 0.0, "age": 0})
                 continue
             self.age.apply(face, sample)

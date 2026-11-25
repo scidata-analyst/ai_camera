@@ -23,10 +23,12 @@ class RknnFaceDetector(FaceDetector):
     def __init__(self, settings: Settings):
         self.score_thr = settings.face_score
         if settings.face_backend == "off":
+
             self.rknn = None
             self.rknn_path = settings.face_rknn_path
             return
         if settings.face_backend not in ("rknn", ""):
+
             raise RuntimeError(
                 f"FACE_BACKEND={settings.face_backend!r} is disabled in "
                 "NPU-only mode")
@@ -43,6 +45,7 @@ class RknnFaceDetector(FaceDetector):
 
     def detect(self, frame: np.ndarray) -> list[Face]:
         if self.rknn is None:
+
             return []
         height, width = frame.shape[:2]
         image, ratio, pad_x, pad_y = face_letterbox(frame)
@@ -54,8 +57,10 @@ class RknnFaceDetector(FaceDetector):
             except ImportError:
                 outputs = self.rknn.inference(inputs=[blob])
             if not outputs:
+
                 raise RuntimeError("RKNN returned no outputs")
             if len(outputs) != 3:
+
                 raise RuntimeError(
                     f"expected loc/conf/landmark outputs, got {len(outputs)}")
             loc, conf, raw_landmarks = [
@@ -71,6 +76,7 @@ class RknnFaceDetector(FaceDetector):
             scores = conf[:, 1]
             selected = np.flatnonzero(scores >= self.score_thr)
             if selected.size == 0:
+
                 return []
             boxes, scores, landmarks = (boxes[selected], scores[selected],
                                         landmarks[selected])

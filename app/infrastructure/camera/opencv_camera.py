@@ -32,6 +32,7 @@ class OpenCVCamera(FrameSource):
     def _connect(self) -> None:
         try:
             if self.cap is not None:
+
                 self.cap.release()
         except Exception:
             pass

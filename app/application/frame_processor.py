@@ -37,6 +37,7 @@ class FrameProcessor:
         for detection in detections:
             result = results.get(detection.get("person_id"))
             if result is None:
+
                 detection["age"] = 0
                 detection["gender"] = "Unknown"
                 continue
@@ -51,6 +52,7 @@ class FrameProcessor:
         detections = self.human_detection.detect(frame)
         faces = []
         if self.face_detection is not None:
+
             faces = self.face_detection.detect(frame, source_frame, detections)
             self.renderer.draw_faces(frame, faces)
         detections = self.human_detection.require_face(detections, faces)
@@ -120,6 +122,7 @@ class FrameProcessor:
             "t_infer_ms": timing["infer_ms"],
         }
         if isinstance(self.headpose, HeadPoseService):
+
             self.last_counts["t_bg_ms"] = self.headpose.last_ms
             self.last_counts["bg_pending"] = self.headpose.pending
         return frame, detections

@@ -18,11 +18,15 @@ def _apply_live(runtime, settings: Settings) -> None:
     human = runtime.processor.human_detection
     detector = getattr(human, "detector", None)
     if detector is not None:
+
         if hasattr(detector, "conf"):
+
             detector.conf = settings.conf
         if hasattr(detector, "person_conf"):
+
             detector.person_conf = settings.person_conf
         if hasattr(detector, "debug"):
+
             detector.debug = settings.yolo_debug
     human.conf = settings.conf
     human.min_height = settings.person_min_h
@@ -32,6 +36,7 @@ def _apply_live(runtime, settings: Settings) -> None:
 
     counter = runtime.processor.count_aggregator
     if hasattr(counter, "set_interval"):
+
         counter.set_interval(settings.interval)
     else:
         counter.interval_sec = settings.interval
@@ -50,6 +55,7 @@ def _apply_live(runtime, settings: Settings) -> None:
         attributes.align_mode = settings.age_align
         aggregator = attributes.aggregator
         if hasattr(aggregator, "set_interval"):
+
             aggregator.set_interval(settings.interval)
         else:
             aggregator.interval_sec = settings.interval

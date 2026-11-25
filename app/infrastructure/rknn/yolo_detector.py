@@ -17,6 +17,7 @@ from .runtime import hw_summary, rknn_infer, rknn_input_summary, rknn_load
 class RknnPersonDetector(PersonDetector):
     def __init__(self, settings: Settings):
         if settings.yolo_backend not in ("rknn", ""):
+
             raise RuntimeError(
                 f"YOLO_BACKEND={settings.yolo_backend!r} is disabled in "
                 "NPU-only mode")
@@ -48,23 +49,27 @@ class RknnPersonDetector(PersonDetector):
 
     def _empty(self):
         if not self._warned:
+
             print("[yolo] inference returned no detections")
             self._warned = True
         return []
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         if self.rknn is None:
+
             raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
         try:
             return self._detect_boxes(frame)
         except Exception as exc:
             if not self._warned:
+
                 print(f"[yolo] inference failed: {exc}")
                 self._warned = True
             return []
 
     def _detect_boxes(self, frame: np.ndarray) -> list[Detection]:
         if self.rknn is None:
+
             raise RuntimeError("[yolo] NPU backend unavailable — CPU disabled")
         height, width = frame.shape[:2]
         image, ratio, pad_x, pad_y = letterbox(frame, self.imgsz)
@@ -79,16 +84,20 @@ class RknnPersonDetector(PersonDetector):
         for output in outputs:
             array = np.asarray(output)
             if array.ndim == 3 and (array.shape[1] == 84 or array.shape[2] == 84):
+
                 prediction = array
                 break
         if prediction is None:
+
             if not self._warned:
+
                 print(f"[yolo] NPU unexpected outputs: "
                       f"{[tuple(np.asarray(o).shape) for o in outputs]} "
                       f"-> empty (shape janiye pathao, fix kore debo)")
                 self._warned = True
             return []
         if prediction.shape[1] == 84:
+
             prediction = np.transpose(prediction[0], (1, 0))
         else:
             prediction = prediction[0]

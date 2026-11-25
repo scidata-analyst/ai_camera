@@ -23,13 +23,16 @@ class OpenCVFrameRenderer(FrameRenderer):
     def draw_humans(self, frame: np.ndarray, detections: list[dict]) -> None:
         for detection in detections:
             if detection["kind"] != "human":
+
                 continue
             x1, y1, x2, y2 = detection["box"]
             gender = detection.get("gender")
             age = detection.get("age")
             if gender not in (None, "", "Unknown") and age:
+
                 label = f"Human {gender} {age}y {detection['conf']:.2f}"
             else:
+
                 label = f"Human {detection['conf']:.2f}"
             color = (0, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)

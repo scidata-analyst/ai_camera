@@ -9,6 +9,7 @@ from ...config.constants import EMPTY_STATS
 
 def _safe_mode(values):
     if not values:
+
         return 0
     try:
         return int(statistics.multimode(values)[0])
@@ -18,6 +19,7 @@ def _safe_mode(values):
 
 def _majority(values):
     if not values:
+
         return None
     counts = collections.Counter(values)
     best = max(counts.values())
@@ -27,6 +29,7 @@ def _majority(values):
 
 def _stats(values):
     if not values:
+
         return {"mean": 0.0, "median": 0, "mode": 0}
     return {
         "mean": round(float(statistics.mean(values)), 2),
@@ -55,6 +58,7 @@ class CountAggregator:
         self.history.append((now, int(human), int(non_human),
                              int(face), int(male), int(female)))
         if now - self._last_publish < self.interval_sec:
+
             return self._cached
         human_values = [item[1] for item in self.history]
         other_values = [item[2] for item in self.history]
@@ -106,10 +110,12 @@ class AttributeAggregator:
         for face in faces:
             person_id = face.get("person_id")
             if person_id is None:
+
                 continue
             gender = face.get("gender")
             age = face.get("age")
             if gender not in ("Male", "Female") or age in (None, 0):
+
                 continue
             samples = self.tracks.setdefault(person_id, collections.deque())
             samples.append((now, int(age), str(gender)))
@@ -117,6 +123,7 @@ class AttributeAggregator:
     def results(self) -> dict:
         now = time.time()
         if now - self._last_publish < self.interval_sec:
+
             return {person_id: dict(result)
                     for person_id, result in self._last_good.items()}
         fresh = {}
@@ -135,6 +142,7 @@ class AttributeAggregator:
         self.tracks.clear()
         for person_id, result in fresh.items():
             if person_id in self._last_good:
+
                 self._last_good.move_to_end(person_id)
             self._last_good[person_id] = dict(result)
         self._last_publish = now
@@ -146,5 +154,6 @@ class AttributeAggregator:
         for face in faces:
             result = results.get(face.get("person_id"))
             if result is not None:
+
                 face.update(result)
         return faces

@@ -10,9 +10,11 @@ def export_onnx(pt: str, imgsz: int, workdir: str) -> str:
                           simplify=True, dynamic=False)
     dst = os.path.join(workdir, "yolo11n.onnx")
     if os.path.abspath(out) != os.path.abspath(dst):
+
         shutil.move(out, dst)
     for p in (os.path.splitext(pt)[0] + ".cache",):
         if os.path.exists(p):
+
             os.remove(p)
     return dst
 
@@ -23,6 +25,7 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int,
     from rknn.api import RKNN
     do_quant = quant.lower() in ("i8", "int8")
     if do_quant and not dataset:
+
         raise SystemExit("[export] --quant i8 hole --dataset calib.txt lagbe "
                          "(proti line e 1ta jpg path)")
     print(f"[export] onnx -> rknn: target={target} quant={'i8' if do_quant else 'fp'}")
@@ -31,14 +34,17 @@ def build_rknn(onnx_path: str, out_path: str, imgsz: int,
                 mean_values=[[0, 0, 0]], std_values=[[1, 1, 1]])
     ret = rknn.load_onnx(model=onnx_path)
     if ret != 0:
+
         raise SystemExit(f"[export] load_onnx fail ret={ret}")
     ret = rknn.build(do_quantization=do_quant,
                      dataset=dataset if do_quant else None)
     if ret != 0:
+
         raise SystemExit(f"[export] build fail ret={ret}")
     ret = rknn.export_rknn(out_path)
     rknn.release()
     if ret != 0:
+
         raise SystemExit(f"[export] export_rknn fail ret={ret}")
     size_mb = os.path.getsize(out_path) / 1e6
     print(f"[export] OK: {out_path} ({size_mb:.1f}MB)")

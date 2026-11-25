@@ -77,11 +77,13 @@ class StreamController:
                 reference = self._latest
             image = reference.copy() if reference is not None else None
             if image is None:
+
                 image = self.flip.apply(self.camera.read())
             ok, buffer = cv2.imencode(
                 ".jpg", image,
                 [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
             if not ok:
+
                 continue
             yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
                    + buffer.tobytes() + b"\r\n")
