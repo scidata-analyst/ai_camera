@@ -54,11 +54,11 @@ class FrameProcessor:
         self._apply_attributes(detections)
         self.renderer.draw_humans(frame, detections)
 
-        human_n = sum(1 for detection in detections if detection["kind"] == "human")
-        non_human_n = 0
-        face_n      = len(faces)
-        male_n = sum(1 for face in faces if face.get("gender") == "Male")
-        female_n = sum(1 for face in faces if face.get("gender") == "Female")
+        human_n         = sum(1 for detection in detections if detection["kind"] == "human")
+        non_human_n     = 0
+        face_n          = len(faces)
+        male_n          = sum(1 for face in faces if face.get("gender") == "Male")
+        female_n        = sum(1 for face in faces if face.get("gender") == "Female")
         look_n          = sum(1 for face in faces if face.get("looking"))
         self.last_faces = faces
 

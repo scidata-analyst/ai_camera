@@ -123,7 +123,7 @@ class AttributeAggregator:
         for person_id, samples in self.tracks.items():
             ages    = [sample[1] for sample in samples]
             genders = [sample[2] for sample in samples]
-            males = sum(1 for value in genders if value == "Male")
+            males   = sum(1 for value in genders if value == "Male")
             females = sum(1 for value in genders if value == "Female")
             fresh[person_id] = {"gender": _majority(genders), "age": int(_majority(ages)), "gconf": round(max(males, females) / len(samples), 3), "attr_samples": len(samples), "attr_method": "mode",}
         self.tracks.clear()
