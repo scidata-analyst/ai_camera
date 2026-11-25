@@ -34,7 +34,7 @@ def _placeholder() -> np.ndarray:
     if _PLACEHOLDER is None:
         image = Image.fromarray(np.zeros((480, 640, 3), dtype=np.uint8))
         draw  = ImageDraw.Draw(image)
-        draw.text((30, 220), "Waiting for frames...", font=_font(26), fill=(200, 210, 225))
+        draw.text((30, 220), "Waiting for camera frames...", font=_font(26), fill=(200, 210, 225))
         _PLACEHOLDER = np.asarray(image).copy()
 
     return _PLACEHOLDER
@@ -124,8 +124,9 @@ class Pipeline:
         self.incoming = queue.Queue()
         self.stop     = threading.Event()
         self._lock    = threading.Lock()
-        self.latest_batch = []
-        self.live         = None
+        self.preview      = None
+        self.overlay_people = []
+        self.overlay_faces  = []
         self.result       = {}
         self.last_error   = None
         self.timings      = {"yolo": 0.0, "face": 0.0, "age": 0.0}
@@ -148,10 +149,12 @@ class Pipeline:
         self.stop.set()
 
     def push(self, frame: np.ndarray) -> None:
-        self.incoming.put((time.time(), frame))
+        stamp = time.time()
 
         with self._lock:
+            self.preview = frame.copy()
             self.stats["frames_in"] += 1
+        self.incoming.put((stamp, frame))
 
     def _capture(self) -> None:
         source = self.settings.camera_source
@@ -236,7 +239,13 @@ class Pipeline:
             started = time.time()
 
             with self._lock:
-                frame = self.live.copy() if self.live is not None else _placeholder()
+                has_frame = self.preview is not None
+                frame = self.preview.copy() if has_frame else _placeholder()
+                people = [dict(person) for person in self.overlay_people]
+                faces  = [dict(face) for face in self.overlay_faces]
+                result = dict(self.result)
+            if has_frame:
+                self._draw(frame, people, faces, result)
             ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.settings.jpeg_quality])
 
             if ok:
@@ -285,7 +294,7 @@ class Pipeline:
         started = time.perf_counter()
 
         try:
-            annotated, result = self._process(batch)
+            result = self._process(batch)
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
             print(f"[batch] {self.last_error}")
@@ -295,12 +304,10 @@ class Pipeline:
         elapsed = round((time.perf_counter() - started) * 1000, 1)
 
         with self._lock:
-            self.latest_batch    = annotated
-            self.live            = annotated[-1].copy() if annotated else None
             self.result          = result
             self.last_error      = None
             self.stats["batches"] += 1
-            self.stats["frames_out"] += len(annotated)
+            self.stats["frames_out"] += len(batch)
         faces    = sum(int(value.get("samples", 0)) for value in result.values())
         model_ms = sum(value * 1000 for value in self.timings.values())
         other_ms = max(0.0, elapsed - model_ms)
@@ -312,60 +319,51 @@ class Pipeline:
             f"other={other_ms:.0f}"
         )
 
-    def _process(self, batch: list) -> tuple[list, dict]:
+    def _process(self, batch: list) -> dict:
         with self._lock:
             previous = dict(self.result)
 
-        timings   = {"yolo": 0.0, "face": 0.0, "age": 0.0}
-        records   = []
-        by_person = defaultdict(list)
+        timings     = {"yolo": 0.0, "face": 0.0, "age": 0.0}
+        by_person   = defaultdict(list)
+        best_index  = None
+        best_score  = (-1.0, -1.0)
+        best_view   = None
+        best_people = []
+        faces       = []
 
-        for _, frame in batch:
-            view    = frame.copy()
+        for index, (_, frame) in enumerate(batch):
             started = time.perf_counter()
-            people  = self._people(view)
+            people  = self._people(frame)
             timings["yolo"] += time.perf_counter() - started
 
-            self._draw(view, people, [], previous)
-
             with self._lock:
-                self.live = view.copy()
-            records.append((view, people, []))
-
-        best_index = None
-        best_score = (-1.0, -1.0)
-
-        for index, (view, people, _) in enumerate(records):
+                self.overlay_people = [dict(person) for person in people]
 
             if not people:
 
                 continue
             score = (
                 sum(float(person.get("conf", 0.0)) for person in people),
-                max(sharpness(view, person["box"]) for person in people),
+                max(sharpness(frame, person["box"]) for person in people),
             )
 
             if score > best_score:
-                best_score = score
-                best_index = index
+                best_score  = score
+                best_index  = index
+                best_view   = frame
+                best_people = people
         self.top_frame = 0 if best_index is None else best_index + 1
 
         if best_index is not None:
-            view, people, _ = records[best_index]
             started = time.perf_counter()
-            faces = self._faces(view, people)
+            faces = self._faces(best_view, best_people)
             timings["face"] += time.perf_counter() - started
-            records[best_index] = (view, people, faces)
 
             for face in faces:
                 person_id = face.get("person_id")
 
                 if person_id is not None:
-                    by_person[person_id].append((face, view))
-            self._draw(view, people, faces, previous)
-
-            with self._lock:
-                self.live = view.copy()
+                    by_person[person_id].append((face, best_view))
 
         result = {}
 
@@ -416,15 +414,11 @@ class Pipeline:
                 face["looking"]     = aggregated["looking"]
                 face["aggregated"]  = True
 
-        annotated = []
-
-        for view, people, faces in records:
-            self._draw(view, people, faces, result)
-            annotated.append(view)
-
+        with self._lock:
+            self.overlay_faces = [dict(face) for face in faces]
         self.timings = timings
 
-        return annotated, result
+        return result
 
     def _people(self, frame: np.ndarray) -> list[dict]:
         boxes = []
