@@ -73,14 +73,14 @@ def _build_runtime() -> SimpleNamespace:
         attributes, headpose)
         if face_detector is not None and attributes is not None else None)
 
-    human_detection = HumanDetectionService(
+    human_detection  = HumanDetectionService(
         person_detector, settings.conf, settings.person_min_h,
         settings.person_require_face, settings.detect_every,
         settings.det_stale_sec)
     count_aggregator = CountAggregator(settings.interval)
     renderer         = OpenCVFrameRenderer()
     processor        = FrameProcessor(human_detection, face_detection, attributes,
-                                       headpose, count_aggregator, renderer)
+                                      headpose, count_aggregator, renderer)
 
     flip      = FlipState(settings.flip_h, settings.flip_v)
     presenter = StatsPresenter(settings, camera, processor, flip, hardware)

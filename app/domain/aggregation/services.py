@@ -43,7 +43,7 @@ class CountAggregator:
         self.interval_sec  = float(interval_sec)
         self.history: list = []
         self._cached       = {key: (dict(value) if isinstance(value, dict) else value)
-                                     for key, value in EMPTY_STATS.items()}
+                              for key, value in EMPTY_STATS.items()}
         self._cached["updated_at"] = time.time()
         self._last_publish         = time.time()
 
