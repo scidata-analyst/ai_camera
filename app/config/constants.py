@@ -34,5 +34,5 @@ RENDER_GLOB     = "/dev/dri/renderD*"
 RKNPU_GLOB      = "/dev/rknpu*"
 EXPLICIT_RENDER = "/dev/dri/renderD129"
 
-ALIGN_MODES = ("box", "roll", "arcface")
+ALIGN_MODES = ("box", "roll", "arcface", "letterbox")
 EMPTY_STATS = {"human": {"mean": 0.0, "median": 0, "mode": 0}, "non_human": {"mean": 0.0, "median": 0, "mode": 0}, "face": {"mean": 0.0, "median": 0, "mode": 0}, "male": {"mean": 0.0, "median": 0, "mode": 0}, "female": {"mean": 0.0, "median": 0, "mode": 0}, "stable_human": 0, "stable_non_human": 0, "stable_face": 0, "stable_male": 0, "stable_female": 0, "samples": 0, "updated_at": 0.0,}

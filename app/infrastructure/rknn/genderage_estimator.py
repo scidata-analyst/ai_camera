@@ -212,8 +212,9 @@ class RknnGenderAgeEstimator(AttributeEstimator):
 
             return None
 
-        aligned = crop_face(frame, face, mode, self.input_size)
-        blob    = self._blob(aligned)
+        crop_mode = "letterbox" if self.mivolo else mode
+        aligned   = crop_face(frame, face, crop_mode, self.input_size)
+        blob      = self._blob(aligned)
         layout  = "nhwc" if (self.mivolo or not self.fairface) else "nchw"
         dtype   = None if self.mivolo else "float32"
         started = time.perf_counter()
@@ -228,7 +229,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
 
             if self.mivolo:
 
-                return self._mivolo_sample(outputs, mode, float(face.get("sharpness", 0.0)))
+                return self._mivolo_sample(outputs, crop_mode, float(face.get("sharpness", 0.0)))
 
             if self.fairface:
                 sample = self._fairface_sample(outputs, mode, float(face.get("sharpness", 0.0)))
