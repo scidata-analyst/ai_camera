@@ -5,7 +5,6 @@ import threading
 import time
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +17,8 @@ from PIL import Image, ImageDraw, ImageFont
 from .config.settings import Settings
 from .domain.geometry import iou, sharpness
 from .infrastructure.rknn.dlib_age_estimator import RknnDlibAgeEstimator
-from .infrastructure.rknn.genderage_estimator import RknnGenderAgeEstimator
+from .infrastructure.rknn.fairface_age_estimator import RknnFairFaceAgeEstimator
+from .infrastructure.rknn.genderage_estimator import RknnGenderEstimator
 from .infrastructure.rknn.retinaface_detector import RknnFaceDetector
 from .infrastructure.rknn.yolo_detector import RknnPersonDetector
 from .interfaces.auth import require_token
@@ -145,19 +145,10 @@ class Pipeline:
         self.person   = RknnPersonDetector(settings)
         self.face     = RknnFaceDetector(settings) if settings.face_enable else None
         face_loaded   = self.face is not None and self.face.describe().get("loaded", False)
-        self.age      = RknnGenderAgeEstimator(settings) if face_loaded else None
-        self.age_extra = None
-        extra_path     = str(settings.age_extra_rknn_path or "").lower()
-        primary_path   = str(settings.age_rknn_path or "").lower()
-
-        if face_loaded and extra_path and extra_path != primary_path:
-            try:
-                extra_settings = replace(settings, age_rknn_path=settings.age_extra_rknn_path)
-                self.age_extra = RknnGenderAgeEstimator(extra_settings)
-            except Exception as exc:
-                print(f"[age-extra] disabled: {exc}")
-        self.age_dlib  = None
-        if face_loaded and settings.age_only_rknn_path:
+        self.gender   = RknnGenderEstimator(settings) if face_loaded else None
+        self.age      = RknnFairFaceAgeEstimator(settings) if face_loaded else None
+        self.age_dlib = None
+        if face_loaded and settings.age_dlib_rknn_path:
             try:
                 self.age_dlib = RknnDlibAgeEstimator(settings)
             except Exception as exc:
@@ -261,8 +252,8 @@ class Pipeline:
         return {
             "person": self.person.describe(),
             "face": self.face.describe() if self.face is not None else None,
-            "age_gender": self.age.describe() if self.age is not None else None,
-            "age_extra": self.age_extra.describe() if self.age_extra is not None else None,
+            "gender": self.gender.describe() if self.gender is not None else None,
+            "age": self.age.describe() if self.age is not None else None,
             "age_dlib": self.age_dlib.describe() if self.age_dlib is not None else None,
         }
 
@@ -434,9 +425,7 @@ class Pipeline:
                     face.get("gender", "Unknown"),
                     bool(face.get("looking")),
                     float(face.get("gconf", 0.0)),
-                    sources.get("insightface"),
-                    sources.get("mivolo"),
-                    sources.get("genderage"),
+                    sources.get("fairface"),
                     sources.get("dlib"),
                 ))
 
@@ -445,10 +434,8 @@ class Pipeline:
                     "age": _mode([value[0] for value in values]),
                     "gender": _mode([value[1] for value in values]),
                     "looking": _mode([value[2] for value in values]),
-                    "age_insightface": _mode([value[4] for value in values]),
-                    "age_mivolo": _mode([value[5] for value in values]),
-                    "age_genderage": _mode([value[6] for value in values]),
-                    "age_dlib": _mode([value[7] for value in values]),
+                    "age_fairface": _mode([value[4] for value in values]),
+                    "age_dlib": _mode([value[5] for value in values]),
                     "samples": len(entries),
                     "confidence": round(sum(value[3] for value in values) / len(values), 3),
                     "model_runs": len(values),
@@ -459,9 +446,7 @@ class Pipeline:
                     "age": prior.get("age", 0),
                     "gender": prior.get("gender", "Unknown"),
                     "looking": bool(prior.get("looking", False)),
-                    "age_insightface": prior.get("age_insightface"),
-                    "age_mivolo": prior.get("age_mivolo"),
-                    "age_genderage": prior.get("age_genderage"),
+                    "age_fairface": prior.get("age_fairface"),
                     "age_dlib": prior.get("age_dlib"),
                     "samples": len(entries),
                     "confidence": float(prior.get("confidence", 0.0)),
@@ -579,48 +564,37 @@ class Pipeline:
 
     def _attributes(self, frame: np.ndarray, face: dict) -> bool:
 
-        if self.age is None:
+        if self.age is None or self.gender is None:
 
             return False
-        sample = self.age.estimate(frame, face, self.settings.age_align)
+        age_sample    = self.age.estimate(frame, face, self.settings.age_align)
+        gender_sample = self.gender.estimate(frame, face, self.settings.age_align)
 
-        if sample is None:
+        if age_sample is None or gender_sample is None:
 
             return False
-        primary_age   = float(sample.raw_age)
-        primary_kind  = self.age.describe().get("model_kind")
-        insight_age   = primary_age if primary_kind == "insightface" else None
-        mivolo_age    = primary_age if primary_kind == "mivolo" else None
-        genderage_age = None
-        dlib_age      = None
-
-        if self.age_extra is not None:
-            extra = self.age_extra.estimate(frame, face, self.settings.age_align)
-
-            if extra is not None:
-                genderage_age = float(extra.raw_age)
+        fairface_age = float(age_sample.raw_age)
+        dlib_age     = None
 
         if self.age_dlib is not None:
             dlib_age = self.age_dlib.estimate_age(frame, face, self.settings.age_align)
 
-        ages = [value for value in (primary_age, genderage_age, dlib_age) if value is not None]
+        ages = [value for value in (fairface_age, dlib_age) if value is not None]
         final_age = sum(ages) / len(ages)
         face["age"]     = int(round(final_age))
         face["raw_age"] = round(final_age, 1)
         face["age_sources"] = {
-            "insightface": None if insight_age is None else round(insight_age, 1),
-            "mivolo": None if mivolo_age is None else round(mivolo_age, 1),
-            "genderage": None if genderage_age is None else round(genderage_age, 1),
+            "fairface": round(fairface_age, 1),
             "dlib": None if dlib_age is None else round(dlib_age, 1),
         }
-        logits          = np.asarray(sample.gender_logits, dtype=np.float32)
+        logits          = np.asarray(gender_sample.gender_logits, dtype=np.float32)
         logits          = logits - float(np.max(logits))
         probs           = np.exp(logits)
         probs          /= max(float(np.sum(probs)), 1e-12)
         chosen          = int(np.argmax(probs))
         face["gender"]  = "Male" if chosen == 1 else "Female"
         face["gconf"]   = round(float(probs[chosen]), 3)
-        face["align"]   = sample.align
+        face["align"]   = gender_sample.align
 
         return True
 
@@ -702,20 +676,16 @@ def result(request: Request):
 @app.get("/api/health", dependencies=[Depends(require_token)])
 def health(request: Request):
     pipeline = request.app.state.runtime.pipeline
-    details  = pipeline.describe()
-    age      = details.get("age_gender") or {}
-    extra    = details.get("age_extra") or {}
-    dlib     = details.get("age_dlib") or {}
+    details = pipeline.describe()
+    gender  = details.get("gender") or {}
+    age     = details.get("age") or {}
+    dlib    = details.get("age_dlib") or {}
 
     return {
-        "age_gender_backend": age.get("backend"),
-        "age_gender_model_kind": age.get("model_kind"),
-        "age_primary_model": age.get("rknn_model"),
-        "age_gender_loaded": bool(age.get("loaded")),
-        "age_source": age.get("age_source"),
-        "age_loaded": bool(age.get("age_loaded")),
-        "age_extra_model": extra.get("rknn_model"),
-        "age_extra_loaded": bool(extra.get("loaded")),
+        "gender_model": gender.get("rknn_model"),
+        "gender_loaded": bool(gender.get("loaded")),
+        "age_model": age.get("rknn_model"),
+        "age_loaded": bool(age.get("loaded")),
         "age_dlib_model": dlib.get("rknn_model"),
         "age_dlib_loaded": bool(dlib.get("loaded")),
         "camera": dict(pipeline.camera_info),

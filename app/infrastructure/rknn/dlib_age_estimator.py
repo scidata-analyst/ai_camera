@@ -20,7 +20,7 @@ from .runtime import rknn_infer, rknn_load
 
 class RknnDlibAgeEstimator:
     def __init__(self, settings: Settings):
-        self.rknn_path = settings.age_only_rknn_path
+        self.rknn_path = settings.age_dlib_rknn_path
         self.rknn = None
 
         if settings.age_backend == "rknn":

@@ -13,17 +13,3 @@ class AttributeEstimator(ABC):
     @abstractmethod
     def describe(self) -> dict:
         raise NotImplementedError
-
-
-class FaceAttributeRecognizer(ABC):
-    @abstractmethod
-    def recognize(self, frame: np.ndarray, faces: list[Face]) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def fill(self, faces: list[Face]) -> list[Face]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def describe(self) -> dict:
-        raise NotImplementedError

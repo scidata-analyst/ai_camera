@@ -89,26 +89,6 @@ def crop_face(frame: np.ndarray, face: dict, mode: str, size: int) -> np.ndarray
 
         return cv2.warpAffine(frame, matrix, (size, size), borderValue = 0.0)
 
-    if mode == "letterbox":
-        ix1 = max(0, int(x1))
-        iy1 = max(0, int(y1))
-        ix2 = min(frame.shape[1], int(x2))
-        iy2 = min(frame.shape[0], int(y2))
-        crop = frame[iy1:iy2, ix1:ix2]
-
-        if crop.size == 0:
-            return np.zeros((size, size, 3), dtype = frame.dtype)
-        ratio = min(size / crop.shape[0], size / crop.shape[1])
-        new_w = max(1, round(crop.shape[1] * ratio))
-        new_h = max(1, round(crop.shape[0] * ratio))
-        resized = cv2.resize(crop, (new_w, new_h), interpolation = cv2.INTER_LINEAR)
-        canvas  = np.zeros((size, size, 3), dtype = frame.dtype)
-        left    = (size - new_w) // 2
-        top     = (size - new_h) // 2
-        canvas[top:top + new_h, left:left + new_w] = resized
-
-        return canvas
-
     if mode == "arcface" and points is not None:
         ratio = size / 112.0
         dst   = ARCFACE_DST * ratio
