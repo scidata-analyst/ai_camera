@@ -84,6 +84,11 @@ def crop_face(frame: np.ndarray, face: dict, mode: str, size: int) -> np.ndarray
     scale  = size / (max(width, height) * 1.5)
     points = landmarks(face)
 
+    if mode == "insightface":
+        matrix = np.asarray([[scale, 0.0, size / 2.0 - cx * scale], [0.0, scale, size / 2.0 - cy * scale],], dtype = np.float32)
+
+        return cv2.warpAffine(frame, matrix, (size, size), borderValue = 0.0)
+
     if mode == "letterbox":
         ix1 = max(0, int(x1))
         iy1 = max(0, int(y1))

@@ -43,9 +43,10 @@ class RknnGenderAgeEstimator(AttributeEstimator):
 
         self.onnx_path = settings.age_onnx_path
         path           = str(self.rknn_path).lower()
-        self.mivolo    = "mivolo" in path
-        self.fairface  = "fairface" in path and not self.mivolo
-        self.input_size = LEGACY_AGE_INPUT_SIZE if not (self.fairface or self.mivolo) else AGE_INPUT_SIZE
+        self.mivolo      = "mivolo" in path
+        self.fairface    = "fairface" in path and not self.mivolo
+        self.insightface = "genderage" in path and not (self.mivolo or self.fairface)
+        self.input_size  = LEGACY_AGE_INPUT_SIZE if not (self.fairface or self.mivolo) else AGE_INPUT_SIZE
 
         self._mean         = np.asarray(FAIRFACE_MEAN, dtype=np.float32)
         self._std          = np.asarray(FAIRFACE_STD, dtype=np.float32)
@@ -68,11 +69,11 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             "backend": "rknn" if self.rknn is not None else "off",
             "onnx_model": self.onnx_path,
             "rknn_model": self.rknn_path,
-            "model_kind": "mivolo" if self.mivolo else "fairface" if self.fairface else "genderage",
+            "model_kind": "mivolo" if self.mivolo else "fairface" if self.fairface else "insightface" if self.insightface else "genderage",
             "input_size": self.input_size,
             "age_rknn_model": self.age_rknn_path,
-            "age_loaded": self.rknn is not None and (self.age_rknn is not None or self.mivolo),
-            "age_source": "mivolo" if self.mivolo else "dlib" if self.age_rknn is not None else "fairface",
+            "age_loaded": self.rknn is not None and (self.age_rknn is not None or self.mivolo or self.insightface),
+            "age_source": "mivolo" if self.mivolo else "insightface" if self.insightface else "dlib" if self.age_rknn is not None else "fairface",
             "age_runs": self.age_runs,
             "age_last_ms": self.age_last_ms,
             "loaded": self.rknn is not None,
@@ -103,6 +104,11 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             rgb = (rgb - self._mean) / self._std
 
             return np.ascontiguousarray(rgb.transpose(2, 0, 1)[np.newaxis, ...], dtype=np.float32)
+
+        if self.insightface:
+            rgb = aligned[:, :, ::-1].astype(np.float32)
+
+            return np.ascontiguousarray(rgb[np.newaxis, ...], dtype=np.float32)
 
         blob = cv2.dnn.blobFromImage(aligned, scalefactor=1.0, size=(self.input_size, self.input_size), mean=(0, 0, 0), swapRB=True)
 
@@ -200,6 +206,16 @@ class RknnGenderAgeEstimator(AttributeEstimator):
 
         return AttributeSample(raw_age=age, gender_logits=(float(values[1]), float(values[0])), align=mode, sharpness=sharpness)
 
+    def _insightface_sample(self, outputs, mode: str, sharpness: float) -> AttributeSample:
+        values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
+
+        if values.size != 3:
+            raise RuntimeError(f"expected 3 InsightFace gender-age outputs, got {values.shape}")
+
+        age = max(0.0, float(values[2]) * 100.0)
+
+        return AttributeSample(raw_age=age, gender_logits=(float(values[0]), float(values[1])), align=mode, sharpness=sharpness)
+
     def estimate(self, frame: np.ndarray, face: Face, mode: str) -> AttributeSample | None:
 
         if self.rknn is None:
@@ -212,7 +228,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
 
             return None
 
-        crop_mode = "letterbox" if self.mivolo else mode
+        crop_mode = "letterbox" if self.mivolo else "insightface" if self.insightface else mode
         aligned   = crop_face(frame, face, crop_mode, self.input_size)
         blob      = self._blob(aligned)
         layout  = "nhwc" if (self.mivolo or not self.fairface) else "nchw"
@@ -230,6 +246,10 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             if self.mivolo:
 
                 return self._mivolo_sample(outputs, crop_mode, float(face.get("sharpness", 0.0)))
+
+            if self.insightface:
+
+                return self._insightface_sample(outputs, crop_mode, float(face.get("sharpness", 0.0)))
 
             if self.fairface:
                 sample = self._fairface_sample(outputs, mode, float(face.get("sharpness", 0.0)))

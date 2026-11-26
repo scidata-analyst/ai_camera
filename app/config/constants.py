@@ -8,6 +8,7 @@ DEFAULT_FACE_RKNN     = "/app/models/RetinaFace_mobile320-rk3576.rknn"
 DEFAULT_FACE_ONNX     = "/app/models/RetinaFace_mobile320.onnx"
 DEFAULT_AGE_ONLY_RKNN = "/app/models/dlib-age-rk3576.rknn"
 DEFAULT_GENDERAGE_RKNN = "/app/models/genderage-rk3576.rknn"
+DEFAULT_GENDERAGE_ONNX = "/app/models/genderage.onnx"
 DEFAULT_MIVOLO_RKNN   = "/app/models/mivolo-face-rk3576.rknn"
 DEFAULT_MIVOLO_ONNX   = "/app/models/mivolo-face.onnx"
 DEFAULT_HEADPOSE_RKNN = "/app/models/whenet-rk3576.rknn"
@@ -34,5 +35,5 @@ RENDER_GLOB     = "/dev/dri/renderD*"
 RKNPU_GLOB      = "/dev/rknpu*"
 EXPLICIT_RENDER = "/dev/dri/renderD129"
 
-ALIGN_MODES = ("box", "roll", "arcface", "letterbox")
+ALIGN_MODES = ("box", "roll", "arcface", "letterbox", "insightface")
 EMPTY_STATS = {"human": {"mean": 0.0, "median": 0, "mode": 0}, "non_human": {"mean": 0.0, "median": 0, "mode": 0}, "face": {"mean": 0.0, "median": 0, "mode": 0}, "male": {"mean": 0.0, "median": 0, "mode": 0}, "female": {"mean": 0.0, "median": 0, "mode": 0}, "stable_human": 0, "stable_non_human": 0, "stable_face": 0, "stable_male": 0, "stable_female": 0, "samples": 0, "updated_at": 0.0,}

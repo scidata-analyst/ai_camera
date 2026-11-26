@@ -105,9 +105,13 @@ def main() -> None:
     args = parser.parse_args()
 
     retinaface = ROOT / "models/RetinaFace_mobile320.onnx"
+    genderage  = ROOT / "models/genderage.onnx"
 
     if not retinaface.is_file():
         raise SystemExit("Missing models/RetinaFace_mobile320.onnx. Download it first.")
+
+    if not genderage.is_file():
+        raise SystemExit("Missing models/genderage.onnx (InsightFace buffalo_l genderage). Download it first.")
 
     fairface = ROOT / "models/fairface.onnx"
 
@@ -116,6 +120,10 @@ def main() -> None:
         urllib.request.urlretrieve(FAIRFACE_URL, fairface)
 
     convert(retinaface, ROOT / "models/RetinaFace_mobile320-rk3576.rknn", args.target, [[104, 117, 123]], [[1, 1, 1]],)
+
+    # InsightFace buffalo_l genderage: graph already normalizes pixels, so the
+    # app sends a raw 96x96 RGB float32 crop without extra mean/std.
+    convert(genderage, ROOT / "models/genderage-rk3576.rknn", args.target, [[0, 0, 0]], [[1, 1, 1]], input_name="data", input_size=(1, 3, 96, 96),)
 
     convert(fairface, ROOT / "models/fairface-rk3576.rknn", args.target, [[0, 0, 0]], [[1, 1, 1]], input_name = "input", input_size = (1, 3, 224, 224),)
 
