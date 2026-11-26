@@ -35,7 +35,7 @@ class HumanDetectionService:
     def _keep(self, detection: Detection) -> bool:
         if detection["kind"] != "human":
             return False
-        x1, y1, x2, y2 = detection["box"]
+        _, y1, _, y2 = detection["box"]
         return (detection["conf"] >= self.conf and
                 (y2 - y1) >= self.min_height)
 

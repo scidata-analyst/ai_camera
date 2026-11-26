@@ -50,5 +50,4 @@ class AttributeRecognitionService(FaceAttributeRecognizer):
             "align": self.align_mode,
             "blur": self.quality.blur_threshold,
         })
-        details.update(self.age.describe())
         return details

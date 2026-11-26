@@ -17,7 +17,7 @@ def export_onnx(pt: str, imgsz: int, workdir: str) -> str:
     return dst
 
 
-def build_rknn(onnx_path: str, out_path: str, imgsz: int,
+def build_rknn(onnx_path: str, out_path: str,
                target: str = "rk3576", quant: str = "fp",
                dataset: str | None = None) -> str:
     from rknn.api import RKNN
@@ -63,7 +63,7 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
     onnx_path = export_onnx(a.model, a.imgsz, a.workdir)
     try:
-        build_rknn(onnx_path, a.out, a.imgsz, a.target, a.quant, a.dataset)
+        build_rknn(onnx_path, a.out, a.target, a.quant, a.dataset)
     finally:
         if not a.keep_onnx and os.path.exists(a.workdir):
             shutil.rmtree(a.workdir, ignore_errors=True)

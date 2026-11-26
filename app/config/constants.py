@@ -1,28 +1,10 @@
 import numpy as np
 
-YOLO_CLASSES = (
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
-    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
-    "baseball bat", "baseball glove", "skateboard", "surfboard",
-    "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon",
-    "bowl", "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
-    "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant",
-    "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote",
-    "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
-    "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-    "hair drier", "toothbrush",
-)
-PERSON_CLASS_ID = 0
 PERSON_CLASS_NAME = "person"
 
 DEFAULT_YOLO_RKNN = "/app/models/yolo11n-rk3576.rknn"
 DEFAULT_FACE_RKNN = "/app/models/RetinaFace_mobile320-rk3576.rknn"
 DEFAULT_FACE_ONNX = "/app/models/RetinaFace_mobile320.onnx"
-DEFAULT_AGE_RKNN = "/app/models/fairface-rk3576.rknn"
-DEFAULT_AGE_ONNX = "/app/models/fairface.onnx"
 DEFAULT_AGE_ONLY_RKNN = "/app/models/dlib-age-rk3576.rknn"
 DEFAULT_MIVOLO_RKNN = "/app/models/mivolo-face-rk3576.rknn"
 DEFAULT_MIVOLO_ONNX = "/app/models/mivolo-face.onnx"
@@ -45,8 +27,6 @@ DLIB_AGE_WEIGHTS = np.array(
 MIVOLO_AGE_MIN = 1.0
 MIVOLO_AGE_MAX = 95.0
 MIVOLO_AGE_AVG = 48.0
-MIVOLO_MEAN = (0.485, 0.456, 0.406)
-MIVOLO_STD = (0.229, 0.224, 0.225)
 
 ARCFACE_DST = np.array([
     [38.2946, 51.6963],

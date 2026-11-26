@@ -149,8 +149,7 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             return []
         return [str(detail.get("name", "")).lower() for detail in details]
 
-    def _fairface_sample(self, outputs, mode: str,
-                         sharpness: float) -> AttributeSample:
+    def _fairface_sample(self, outputs, mode: str) -> AttributeSample:
         arrays = [np.asarray(value, dtype=np.float32).reshape(-1)
                   for value in outputs]
         names = self._output_names()
@@ -179,11 +178,9 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             raw_age=age,
             gender_logits=(float(gender[1]), float(gender[0])),
             align=mode,
-            sharpness=sharpness,
         )
 
-    def _mivolo_sample(self, outputs, mode: str,
-                       sharpness: float) -> AttributeSample:
+    def _mivolo_sample(self, outputs, mode: str) -> AttributeSample:
         values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
         if values.size != 3:
             raise RuntimeError(
@@ -195,7 +192,6 @@ class RknnGenderAgeEstimator(AttributeEstimator):
             raw_age=age,
             gender_logits=(float(values[1]), float(values[0])),
             align=mode,
-            sharpness=sharpness,
         )
 
     def estimate(self, frame: np.ndarray, face: Face,
@@ -216,18 +212,15 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 raise RuntimeError("RKNN returned no outputs")
             self.runs += 1
             if self.mivolo:
-                return self._mivolo_sample(
-                    outputs, mode, float(face.get("sharpness", 0.0)))
+                return self._mivolo_sample(outputs, mode)
             if self.fairface:
-                sample = self._fairface_sample(
-                    outputs, mode, float(face.get("sharpness", 0.0)))
+                sample = self._fairface_sample(outputs, mode)
                 if self.age_rknn is not None:
                     age = self._estimate_age(aligned, sample.raw_age)
                     sample = AttributeSample(
                         raw_age=age,
                         gender_logits=sample.gender_logits,
                         align=sample.align,
-                        sharpness=sample.sharpness,
                     )
                 return sample
             values = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
@@ -238,7 +231,6 @@ class RknnGenderAgeEstimator(AttributeEstimator):
                 raw_age=float(values[2]) * 100.0,
                 gender_logits=(float(values[0]), float(values[1])),
                 align=mode,
-                sharpness=float(face.get("sharpness", 0.0)),
             )
         except Exception as exc:
             print(f"[age-gender] inference failed: {exc}")

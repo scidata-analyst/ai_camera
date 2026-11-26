@@ -12,4 +12,3 @@ class AttributeSample:
     raw_age: float
     gender_logits: tuple[float, float]
     align: str
-    sharpness: float

@@ -60,7 +60,7 @@ def _runtime_input_layout(rknn, index: int = 0) -> tuple[str, tuple]:
     return "", ()
 
 
-def _as_4d(blob: np.ndarray, layout: str) -> np.ndarray:
+def _as_4d(blob: np.ndarray) -> np.ndarray:
     if blob.ndim == 3:
         return np.ascontiguousarray(blob[np.newaxis, ...])
     return blob
@@ -77,7 +77,7 @@ def _reorder(blob: np.ndarray, src: str, dst: str) -> np.ndarray:
 
 
 def rknn_infer(rknn, blob, layout: str, dtype: str | None = None):
-    blob = _as_4d(blob, layout)
+    blob = _as_4d(blob)
     runtime_layout, runtime_shape = _runtime_input_layout(rknn)
     if runtime_layout in ("nchw", "nhwc"):
         blob = _reorder(blob, layout, runtime_layout)

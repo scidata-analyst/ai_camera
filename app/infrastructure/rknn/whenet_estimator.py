@@ -20,7 +20,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
         self.yaw_thr = settings.look_yaw
         self.pitch_thr = settings.look_pitch
         self.rknn_path = settings.headpose_rknn_path
-        self.onnx_path = settings.headpose_onnx_path
         self.rknn = None
         self.backend = "off"
         self.providers = ["CPUExecutionProvider"]
@@ -62,17 +61,6 @@ class RknnHeadPoseEstimator(HeadPoseAnalyzer):
                 raise RuntimeError("RKNN returned no outputs")
             rows.append(np.asarray(outputs[0], dtype=np.float32).reshape(-1)[:3])
         return np.asarray(rows, dtype=np.float32)
-
-    @staticmethod
-    def _preprocess(crop: np.ndarray) -> np.ndarray:
-        image = cv2.resize(crop, (WHENET_INPUT_SIZE, WHENET_INPUT_SIZE))
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        return np.transpose(image, (2, 0, 1))[np.newaxis, ...].astype(np.float32)
-
-    def predict_crop(self, crop: np.ndarray):
-        output = self._infer(self._preprocess(crop))[0]
-        yaw, roll, pitch = float(output[0]), float(output[1]), float(output[2])
-        return yaw, pitch, roll
 
     def remember(self, faces: list[Face]) -> list[Face]:
         now = time.time()

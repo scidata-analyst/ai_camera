@@ -11,6 +11,3 @@ class AgeService:
             "raw_age": round(raw_age, 1),
             "align": sample.align,
         })
-
-    def describe(self) -> dict:
-        return {}

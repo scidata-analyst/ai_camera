@@ -6,11 +6,9 @@ from dataclasses import dataclass
 from .constants import (
     ALIGN_MODES,
     DEFAULT_AGE_ONLY_RKNN,
-    DEFAULT_FACE_ONNX,
     DEFAULT_MIVOLO_ONNX,
     DEFAULT_MIVOLO_RKNN,
     DEFAULT_FACE_RKNN,
-    DEFAULT_HEADPOSE_ONNX,
     DEFAULT_HEADPOSE_RKNN,
     DEFAULT_YOLO_RKNN,
 )
@@ -63,7 +61,6 @@ class Settings:
     cv_threads: int
     yolo_backend: str
     rknn_model: str
-    rknpu_core: str
     detect_every: int
     person_conf: float
     person_min_h: int
@@ -73,7 +70,6 @@ class Settings:
     face_every: int
     face_score: float
     face_backend: str
-    face_onnx_path: str
     face_rknn_path: str
     age_backend: str
     age_onnx_path: str
@@ -82,7 +78,6 @@ class Settings:
     face_blur: float
     age_align: str
     headpose_backend: str
-    headpose_onnx_path: str
     headpose_rknn_path: str
     look_yaw: float
     look_pitch: float
@@ -111,7 +106,6 @@ class Settings:
             cv_threads=_int("CV_THREADS", 4),
             yolo_backend=_text("YOLO_BACKEND", "rknn").lower(),
             rknn_model=_text("RKNN_MODEL", DEFAULT_YOLO_RKNN),
-            rknpu_core=_text("RKNPU_CORE", "AUTO"),
             detect_every=max(1, _int("DETECT_EVERY", 2)),
             person_conf=_float("PERSON_CONF", 0.65),
             person_min_h=_int("PERSON_MIN_H", 0),
@@ -121,7 +115,6 @@ class Settings:
             face_every=max(1, _int("FACE_EVERY", 2)),
             face_score=_float("FACE_SCORE", 0.6),
             face_backend=_text("FACE_BACKEND", "rknn").lower(),
-            face_onnx_path=_text("FACE_MODEL", DEFAULT_FACE_ONNX),
             face_rknn_path=_text("FACE_RKNN_MODEL", DEFAULT_FACE_RKNN),
             age_backend=_text("AGE_GENDER_BACKEND", "rknn").lower(),
             age_onnx_path=_text("AGE_GENDER_MODEL", DEFAULT_MIVOLO_ONNX),
@@ -130,7 +123,6 @@ class Settings:
             face_blur=_float("FACE_BLUR", 80.0),
             age_align=align,
             headpose_backend=_text("HEADPOSE_BACKEND", "rknn").lower(),
-            headpose_onnx_path=_text("HEADPOSE_MODEL", DEFAULT_HEADPOSE_ONNX),
             headpose_rknn_path=_text("HEADPOSE_RKNN_MODEL", DEFAULT_HEADPOSE_RKNN),
             look_yaw=_float("LOOK_YAW", 25.0),
             look_pitch=_float("LOOK_PITCH", 20.0),

@@ -75,7 +75,7 @@ class FaceDetectionService:
             unique.append(face)
         return unique
 
-    def detect(self, frame, source_frame, humans=None) -> list[Face]:
+    def detect(self, source_frame, humans=None) -> list[Face]:
         self._face_no += 1
         run = (self._face_no % self.detect_every == self.detect_every - 1) \
             or not self._last

@@ -18,10 +18,6 @@ class HeadPoseService(HeadPoseAnalyzer):
             threading.Thread(target=self._bg_loop, daemon=True).start()
 
     @property
-    def enabled(self) -> bool:
-        return self.analyzer is not None
-
-    @property
     def pending(self) -> bool:
         return bool(self._pending)
 
