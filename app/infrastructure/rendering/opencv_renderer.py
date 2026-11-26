@@ -8,15 +8,16 @@ from .text import draw as draw_text, measure as measure_text
 
 
 class OpenCVFrameRenderer(FrameRenderer):
-    LABEL_SIZE = 16
+    LABEL_SIZE  = 16
     HEADER_SIZE = 20
-    SUB_SIZE = 16
+    SUB_SIZE    = 16
 
     def draw_faces(self, frame: np.ndarray, faces: list[dict]) -> None:
         for face in faces:
             x1, y1, x2, y2 = face["box"]
             color = (0, 255, 0) if face.get("looking") else (0, 255, 255)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
             for px, py in face.get("landmarks", []):
                 cv2.circle(frame, (int(px), int(py)), 2, (0, 0, 255), -1)
 
@@ -24,13 +25,16 @@ class OpenCVFrameRenderer(FrameRenderer):
         for detection in detections:
             if detection["kind"] != "human":
                 continue
+
             x1, y1, x2, y2 = detection["box"]
             gender = detection.get("gender")
-            age = detection.get("age")
+            age    = detection.get("age")
+
             if gender not in (None, "", "Unknown") and age:
                 label = f"Human {gender} {age}y {detection['conf']:.2f}"
             else:
                 label = f"Human {detection['conf']:.2f}"
+
             color = (0, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             width, height = measure_text(label, self.LABEL_SIZE, 1)
@@ -47,8 +51,9 @@ class OpenCVFrameRenderer(FrameRenderer):
             f"W:{values['female_n']}[{values['stable_female']}] "
             f"Look:{values['look_n']} FPS:{values['fps']:.1f}")
         seconds = f"{float(values['interval_sec']):g}s"
-        sub = (f"{seconds} avg mean:{values['mean']} "
-               f"median:{values['median']} mode:{values['mode']}")
+        sub     = (f"{seconds} avg mean:{values['mean']} "
+                   f"median:{values['median']} mode:{values['mode']}")
+
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 56), (0, 0, 0), -1)
         draw_text(frame, (10, 6), header, self.HEADER_SIZE, (255, 255, 255), 1)
         draw_text(frame, (10, 31), sub, self.SUB_SIZE, (0, 255, 255))

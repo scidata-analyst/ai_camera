@@ -17,6 +17,7 @@ class FlipState:
             self.h = bool(int(h))
         if v is not None:
             self.v = bool(int(v))
+
         return self.as_dict()
 
     def toggle(self, axis: str = "h") -> dict:
@@ -27,6 +28,7 @@ class FlipState:
         elif axis in ("both", "180"):
             self.h = not self.h
             self.v = not self.v
+
         return self.as_dict()
 
     def apply(self, frame: np.ndarray) -> np.ndarray:
@@ -36,4 +38,5 @@ class FlipState:
             return cv2.flip(frame, 1)
         if self.v:
             return cv2.flip(frame, 0)
+
         return frame

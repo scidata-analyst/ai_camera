@@ -48,40 +48,43 @@ def _build_runtime() -> SimpleNamespace:
         hardware = {}
         print(f"[hw] accel check skip: {exc}")
 
-    camera = OpenCVCamera(settings.camera_source, settings.frame_width,
-                          settings.frame_height)
+    camera          = OpenCVCamera(settings.camera_source, settings.frame_width, settings.frame_height)
     person_detector = RknnPersonDetector(settings)
-    face_detector = RknnFaceDetector(settings) if settings.face_enable else None
-    face_loaded = (face_detector is not None and
-                   face_detector.describe().get("loaded", False))
-    estimator = (RknnGenderAgeEstimator(settings) if face_loaded else None)
-    age_service = AgeService()
-    gender_service = GenderService()
-    quality = FaceQualityService(settings.face_blur)
+    face_detector   = RknnFaceDetector(settings) if settings.face_enable else None
+    face_loaded     = (face_detector is not None and
+                       face_detector.describe().get("loaded", False))
+    estimator       = (RknnGenderAgeEstimator(settings) if face_loaded else None)
+
+    age_service          = AgeService()
+    gender_service       = GenderService()
+    quality              = FaceQualityService(settings.face_blur)
     attribute_aggregator = AttributeAggregator(interval_sec=settings.interval)
-    attributes = (AttributeRecognitionService(
+
+    attributes        = (AttributeRecognitionService(
         estimator, quality, age_service, gender_service, attribute_aggregator,
         settings.face_min_size, settings.age_align) if estimator is not None
         else None)
-    headpose_adapter = (RknnHeadPoseEstimator(settings)
-                        if settings.headpose_enable and face_loaded else None)
-    headpose = (HeadPoseService(headpose_adapter, True)
-                if headpose_adapter is not None else None)
-    face_detection = (FaceDetectionService(
+    headpose_adapter  = (RknnHeadPoseEstimator(settings)
+                         if settings.headpose_enable and face_loaded else None)
+    headpose          = (HeadPoseService(headpose_adapter, True)
+                         if headpose_adapter is not None else None)
+    face_detection    = (FaceDetectionService(
         face_detector, settings.face_every,
         attributes, headpose)
         if face_detector is not None and attributes is not None else None)
+
     human_detection = HumanDetectionService(
         person_detector, settings.conf, settings.person_min_h,
         settings.person_require_face, settings.detect_every,
         settings.det_stale_sec)
     count_aggregator = CountAggregator(settings.interval)
-    renderer = OpenCVFrameRenderer()
-    processor = FrameProcessor(human_detection, face_detection, attributes,
-                               headpose, count_aggregator, renderer)
-    flip = FlipState(settings.flip_h, settings.flip_v)
+    renderer         = OpenCVFrameRenderer()
+    processor        = FrameProcessor(human_detection, face_detection, attributes,
+                                       headpose, count_aggregator, renderer)
+
+    flip      = FlipState(settings.flip_h, settings.flip_v)
     presenter = StatsPresenter(settings, camera, processor, flip, hardware)
-    stream = StreamController(camera, processor, settings, flip)
+    stream    = StreamController(camera, processor, settings, flip)
 
     return SimpleNamespace(
         settings=settings, hardware=hardware, camera=camera,
@@ -91,17 +94,18 @@ def _build_runtime() -> SimpleNamespace:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     runtime = _build_runtime()
+
     app.state.runtime = runtime
     runtime.camera.start()
     runtime.stream.start()
+
     try:
         yield
     finally:
         runtime.camera.stop()
 
 
-app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)",
-              lifespan=lifespan)
+app = FastAPI(title="AI Camera - Human + Face + Gender (RK3576)", lifespan=lifespan)
 app.include_router(stream_controller.public_router)
 app.include_router(stream_controller.router)
 app.include_router(api_controller.router)

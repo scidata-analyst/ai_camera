@@ -9,23 +9,22 @@ from ..flip_state import FlipState
 
 
 class StatsPresenter:
-    def __init__(self, settings: Settings, camera: FrameSource,
-                 processor: FrameProcessor, flip: FlipState,
-                 hardware: dict):
-        self.settings = settings
-        self.camera = camera
+    def __init__(self, settings: Settings, camera: FrameSource, processor: FrameProcessor, flip: FlipState, hardware: dict):
+        self.settings  = settings
+        self.camera    = camera
         self.processor = processor
-        self.flip = flip
-        self.hardware = hardware
+        self.flip      = flip
+        self.hardware  = hardware
 
     def health(self) -> dict:
-        human = self.processor.human_detection.describe()
-        face = (self.processor.face_detection.describe()
-                if self.processor.face_detection is not None else {})
+        human      = self.processor.human_detection.describe()
+        face       = (self.processor.face_detection.describe()
+                      if self.processor.face_detection is not None else {})
         attributes = (self.processor.attributes.describe()
                       if self.processor.attributes is not None else {})
-        headpose = (self.processor.headpose.describe()
-                    if self.processor.headpose is not None else {})
+        headpose   = (self.processor.headpose.describe()
+                      if self.processor.headpose is not None else {})
+
         backends = {
             "object_detection": human.get("backend", "cpu"),
             "face_detection": face.get("backend", "off"),
@@ -43,6 +42,7 @@ class StatsPresenter:
                  or not self.settings.headpose_enable
                  or headpose.get("loaded", False))
         )
+
         return {
             "status": "ok" if ready else "degraded",
             "camera_connected": self.camera.connected,
@@ -85,6 +85,7 @@ class StatsPresenter:
     def stats(self) -> dict:
         attributes = (self.processor.attributes.describe()
                       if self.processor.attributes is not None else {})
+
         return {
             "camera_connected": self.camera.connected,
             "instant": self.processor.last_counts,
